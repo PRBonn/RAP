@@ -1,0 +1,34 @@
+_target_: rectified_point_flow.data.PointCloudDataModule
+multi_anchor: true
+random_scale_range: [0.9, 1.1]
+
+use_random_split: false # otherwise, we use the sequence-based split
+force_use_ply: true # set to true to force loading PLY files instead of HDF5
+
+data_root: ${data_root}
+
+dataset_names: [
+  "your_dataset_name_1",
+  "your_dataset_name_2",
+  "your_dataset_name_3",
+  "your_dataset_name_4",
+  "your_dataset_name_5",
+  "your_dataset_name_6",
+  "your_dataset_name_7",
+  "your_dataset_name_8",
+  "your_dataset_name_9",
+  "your_dataset_name_10",
+]
+
+dataset_sample_limits: {
+  "your_dataset_name_1": 5000,
+}
+
+dataset_configs:
+  your_dataset_name_2: { yaw_augmentation: false }
+  your_dataset_name_5: { roll_pitch_range: 60.0 }
+
+
+batch_size: 8
+num_workers: 8
+limit_val_samples: 0  # 0 for all samples

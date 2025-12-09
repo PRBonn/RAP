@@ -1,0 +1,66 @@
+# Inference demo
+
+defaults:
+  - model: rap_10
+  - data: data_tmp
+  - trainer: infer
+  - loggers: wandb
+  - visualizer: flow
+  - _self_
+  - override hydra/hydra_logging: disabled
+
+# Seed
+seed: 42
+
+# Disable hydra logging
+hydra:
+  verbose: false
+  output_subdir: null
+  run:
+    dir: .
+
+visualizer:
+  folder_suffix: null
+  filter_failures: false
+  failure_metric: "recall_at_5deg_2m (outdoor_bufferx)"
+  failure_generation_idx: 0
+  max_samples_per_batch: 0
+
+# Data
+data_root: ./demo_new/data
+data:
+  dataset_names: []      # [] means using all datasets in the data_root
+  batch_size: 1
+  num_workers: 1
+  min_parts: 2
+  max_parts: 64
+  min_points_per_part: 200
+  max_points_per_part: 40000
+  max_points_per_batch: 80000
+
+# Log directory
+log_dir: ./demo_new/
+
+# Checkpoint path
+ckpt_path: null          # when null, the checkpoint will be downloaded from Hugging Face
+
+# Model settings
+model:
+  encoder_ckpt: null
+  flow_model_ckpt: null
+  inference_sampling_steps: 10 # 1, 5, 10, 50
+  n_generations: 1
+  save_results: true     # save evaluation results to log_dir/results
+  save_json: false        # save JSON files when save_results is true (set to false to skip JSON files)
+  save_pointcloud_parts: false
+  folder_suffix: ${visualizer.folder_suffix}
+  max_samples_per_batch: ${visualizer.max_samples_per_batch}
+  rmse_eval_on: false   # Enable RMSE evaluation for point cloud pairs (only works when max_parts=2)
+  rigidity_forcing: true
+  return_end_point_trajectory: true
+  use_average_rigidity_rmse: true  # If true, use average RMSE over all generation steps for rigidity selection; if false, use only final step
+
+  flow_model:
+    max_points_per_part: ${data.max_points_per_part}
+    max_points_per_batch: ${data.max_points_per_batch}
+    qk_norm: true

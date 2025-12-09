@@ -1,0 +1,7 @@
+_target_: rectified_point_flow.utils.optimizers.build_muon_with_aux_adam
+_partial_: True
+lr_muon: 2e-3
+lr: 2e-4
+weight_decay: 0.01
+betas: [0.9, 0.95]
+

@@ -1,0 +1,7 @@
+_target_: lightning.pytorch.Trainer
+
+devices: 1
+accelerator: auto
+strategy: auto
+precision: "16-mixed"
+default_root_dir: ${log_dir}

@@ -1,0 +1,14 @@
+addict==2.4.0
+scipy==1.15.2
+h5py==3.13.0
+tqdm==4.67.1
+hydra-core==1.3.2
+wandb==0.20.1
+mitsuba==3.6.4
+matplotlib==3.10.3
+rich==14.0.0
+open3d
+natsort
+laspy
+gradio>=6.0.0
+huggingface-hub

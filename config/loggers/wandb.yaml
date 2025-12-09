@@ -1,0 +1,8 @@
+wandb:
+  _target_: lightning.pytorch.loggers.wandb.WandbLogger
+  project: "rectified-point-flow"
+  entity: null
+  id: null
+  resume: 'auto'
+  name: ${experiment_name}
+  save_dir: ${log_dir}

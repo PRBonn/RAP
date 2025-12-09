@@ -1,0 +1,36 @@
+# Python
+__pycache__
+*.pyc
+
+# Output
+/output
+/outputs
+/logs
+/logs2
+/weights
+lightning_logs/
+*.log
+
+# OS
+.DS_Store
+
+# Dev
+.vscode
+/unittest
+/local
+
+# Demo results
+/demo/visualizations
+/demo/results
+
+# Poetry
+poetry.lock
+
+/dataset
+
+/demo_new
+
+/gradio_tmp
+/.gradio
+
+/demo_example_data

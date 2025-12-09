@@ -1,0 +1,53 @@
+_target_: rectified_point_flow.visualizer.FlowVisualizationCallback
+
+save_dir: ${log_dir}
+
+# We support the following renderers:
+# - "mitsuba": Use Mitsuba for high quality ray-traced rendering.
+# - "pytorch3d": Use PyTorch3D's PointRasterizer for fast rendering.
+# - "none": Do not save any visualizations.
+renderer: mitsuba
+
+# Point cloud settings
+center_points: false
+scale_to_original_size: false
+
+# Color settings
+# We support the following colormaps:
+# - "matplotlib:<name>": Use matplotlib colormap of the given name, e.g. "matplotlib:Set2"
+# - "hue:<luminance>:<saturation>": Use hue-based color ring with the given luminance and saturation.
+# - "default": Predefined 10 colors.
+colormap: default
+
+# Image settings
+image_size: 800           # Output resolution (square image)
+point_radius: 0.005       # Radius of sphere of each point
+
+# Camera parameters
+camera_dist: 4.0          # Distance from the camera to the point cloud center
+camera_elev: 0.0         # Elevation angle (negative = looking up from below)
+camera_azim: 90.0          # Azimuth angle on the horizon plane (0° = no rotation)
+camera_fov: 35.0          # Field of view
+
+# Trajectory GIF settings
+save_trajectory: false    # Whether to save the trajectory as a GIF animation
+trajectory_gif_fps: 10    # Frames per second
+trajectory_gif_pause_last_frame: 4.0  # Pause for the last frame in seconds
+
+# Failure filtering settings
+filter_failures: false    # If True, only visualize samples that fail the specified metric
+failure_metric: null      # Metric name to check for failures (e.g., "recall_at_5deg_2m (outdoor_bufferx)")
+failure_generation_idx: 0 # Which generation index to use for failure checking
+
+# Folder and output settings
+folder_suffix: null       # Optional suffix to append to dataset name in folder path
+
+# Individual parts visualization
+save_individual_parts: false  # If True, save individual visualizations for each part colored by part ID
+colorize_input_parts_with_pca: false  # If True and save_individual_parts=True, colorize input parts using PCA of point-wise local features from batch["features"]
+colorize_generated_parts_with_pca: false  # If True and save_individual_parts=True, colorize generated parts using PCA of transformer features (after transformer, before MLP head)
+
+# Visualization limits
+max_samples_per_batch: null  # Maximum samples to visualize per batch. null means all samples.
+
+

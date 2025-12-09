@@ -1,0 +1,31 @@
+_target_: lightning.pytorch.Trainer
+
+accelerator: auto
+devices: auto
+num_nodes: auto
+strategy: ddp
+precision: "16-mixed"
+default_root_dir: ${log_dir}
+
+max_epochs: 2000
+gradient_clip_val: 0.5
+accumulate_grad_batches: 1
+check_val_every_n_epoch: 10
+
+callbacks:
+  - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ./output/${experiment_name}
+    filename: "epoch-{epoch}"
+    auto_insert_metric_name: False
+    save_last: True
+    save_top_k: 1
+    monitor: val/overall/object_chamfer
+    mode: min
+    every_n_epochs: 1
+    save_on_train_epoch_end: True
+    enable_version_counter: False
+
+  - _target_: lightning.pytorch.callbacks.RichModelSummary
+
+  - _target_: lightning.pytorch.callbacks.LearningRateMonitor
+    logging_interval: epoch
