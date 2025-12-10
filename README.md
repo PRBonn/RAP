@@ -35,6 +35,8 @@
 
 ![rap_teaser](https://github.com/user-attachments/assets/932cc717-c2d4-4251-ba7e-7a36472a04a7)
 
+![rap_example](https://github.com/user-attachments/assets/cc1b77ee-de82-4b5f-9600-3c8cd69747ce)
+
 
 ## TODO List
    - [x] Release the inference code and RAP model v1.0.

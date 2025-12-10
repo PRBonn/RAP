@@ -471,6 +471,9 @@ def main():
                         help='Path to PRFM checkpoint')
     parser.add_argument('--config', type=str, default='RAP_inference',
                         help='Config name for inference (default: RAP_inference)')
+    parser.add_argument('--model', type=str, default=None,
+                        choices=['rap_10', 'rap_12'],
+                        help='Model configuration to use (default: None, uses config default)')
     parser.add_argument('--rigidity_forcing', action='store_true', default=True,
                         help='Enable rigidity forcing in flow model (default: True)')
     parser.add_argument('--no_rigidity_forcing', dest='rigidity_forcing', action='store_false',
@@ -803,6 +806,8 @@ def main():
                     f'log_dir={log_dir}',
                     f'data.dataset_names=[{dataset_name}]',
                 ]
+                if args.model:
+                    overrides.append(f'model={args.model}')
                 if args.flow_model_checkpoint:
                     overrides.append(f'ckpt_path={args.flow_model_checkpoint}')
                 # Set rigidity_forcing (default is True)
@@ -817,7 +822,8 @@ def main():
                 if args.save_trajectory:
                     overrides.append(f'visualizer.max_samples_per_batch=1')
                 
-                logger.info(f"Flow matching parameters: n_generations={args.n_generations}, inference_steps={args.inference_sampling_steps}")
+                model_name = args.model if args.model else "default (from config)"
+                logger.info(f"Flow matching parameters: model={model_name}, n_generations={args.n_generations}, inference_steps={args.inference_sampling_steps}")
                 
                 cfg = hydra.compose(
                     config_name=args.config,
