@@ -359,6 +359,7 @@ class SampleProcessor:
         
         if self.remove_outliers:
             logger.debug(f"Removing statistical outliers from {len(original_parts)} parts for FPS sampling")
+            outlier_removal_start_time = time.time()
             
             fps_parts = []
             fps_normals = []
@@ -372,6 +373,7 @@ class SampleProcessor:
                     continue
                 
                 try:
+                    part_start_time = time.time()
                     # Create point cloud for outlier removal
                     pcd = o3d.geometry.PointCloud()
                     pcd.points = o3d.utility.Vector3dVector(orig_part)
@@ -383,6 +385,7 @@ class SampleProcessor:
                     )
                     
                     inlier_indices = np.array(inlier_indices)
+                    part_elapsed_time = time.time() - part_start_time
                     
                     if len(inlier_indices) == 0:
                         logger.warning(f"All points removed as outliers from part {i}, keeping original for FPS")
@@ -399,12 +402,15 @@ class SampleProcessor:
                         
                         outliers_removed = len(orig_part) - len(inlier_indices)
                         outlier_ratio = outliers_removed / len(orig_part) * 100
-                        logger.debug(f"Part {i}: removed {outliers_removed} outliers ({outlier_ratio:.1f}%) for FPS, kept {len(inlier_indices)} points")
+                        logger.debug(f"Part {i}: removed {outliers_removed} outliers ({outlier_ratio:.1f}%) for FPS, kept {len(inlier_indices)} points in {part_elapsed_time:.3f}s")
                 
                 except Exception as e:
                     logger.warning(f"Outlier removal failed for part {i}: {e}, keeping original for FPS")
                     fps_parts.append(orig_part)
                     fps_normals.append(orig_normals_i)
+            
+            outlier_removal_elapsed_time = time.time() - outlier_removal_start_time
+            logger.info(f"Outlier removal completed in {outlier_removal_elapsed_time:.3f}s for {len(original_parts)} parts")
         
         # Step 3: Apply proportional batched FPS with minimum points per part constraint
         # Calculate adaptive sample count for voxel_adaptive method

@@ -460,7 +460,8 @@ with gr.Blocks() as demo:
         "📦 The results (including registered point clouds and logs) will be returned as a zip file.\n\n"
         "🚧 This demo is currently under construction and running on a local machine.\n"
         "⏳ Please be patient as it runs slower than usual due to gradio IO limitations.\n"
-        "💡 You may need to enable the WebGPU for the visualization.\n"
+        "💡 You may need to enable the WebGPU for the visualization.\n\n"
+        "🤔 Tips: If the results are not satisfactory, you can try to increase the number of generations or inference sampling steps and disable the adaptive parameters to try other settings.\n"
     )
     
     with gr.Row():
@@ -490,7 +491,7 @@ with gr.Blocks() as demo:
         # print(f"n_generations: {n_generations}, inference_sampling_steps: {inference_sampling_steps}")
     
     with gr.Row():
-        voxel_size = gr.Slider(minimum=0.01, maximum=0.6, value=0.25, step=0.01,
+        voxel_size = gr.Slider(minimum=0.01, maximum=0.4, value=0.25, step=0.01,
                               label="Voxel size (meters) [overwritten by adaptive parameters]")
         voxel_ratio = gr.Slider(minimum=0.02, maximum=2.0, value=0.2, step=0.01,
                                label="Voxel ratio for sampling")

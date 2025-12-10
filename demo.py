@@ -461,8 +461,8 @@ def main():
                         help='Ratio for voxel_adaptive allocation (default: 0.1)')
     parser.add_argument('--min_points_per_part', type=int, default=200,
                         help='Minimum points per part (default: 200)')
-    parser.add_argument('--max_points_per_part', type=int, default=20000,
-                        help='Maximum points per part (default: 20000)')
+    parser.add_argument('--max_points_per_part', type=int, default=10000,
+                        help='Maximum points per part (default: 10000)')
     parser.add_argument('--global_seed', type=int, default=42,
                         help='Random seed (default: 42)')
     
@@ -701,9 +701,9 @@ def main():
         logger.info(f"Median bounding box dimensions: x={median_x:.3f}, y={median_y:.3f}, z={median_z:.3f}")
         logger.info(f"Median size (across x,y,z): {median_size:.3f}")
         
-        # Set adaptive voxel_size: median / 500, bounded by [0.01, 0.6]
+        # Set adaptive voxel_size: median / 500, bounded by [0.01, 0.4]
         adaptive_voxel_size = median_size / 500.0
-        adaptive_voxel_size = max(0.01, min(0.6, adaptive_voxel_size))
+        adaptive_voxel_size = max(0.01, min(0.4, adaptive_voxel_size))
         
         # Set adaptive des_r: 20 * voxel_size
         adaptive_des_r = 20.0 * adaptive_voxel_size
