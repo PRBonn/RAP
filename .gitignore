@@ -34,3 +34,8 @@ poetry.lock
 /.gradio
 
 /demo_example_data
+
+/temp_data
+
+/bak
+

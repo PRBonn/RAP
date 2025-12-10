@@ -33,9 +33,13 @@
   <div align="center"></div>
 </p>
 
+---
+
 ![rap_teaser](https://github.com/user-attachments/assets/932cc717-c2d4-4251-ba7e-7a36472a04a7)
 
-![rap_example](https://github.com/user-attachments/assets/cc1b77ee-de82-4b5f-9600-3c8cd69747ce)
+----
+
+![rap_example](https://github.com/user-attachments/assets/7878fbb6-1605-42b7-bb6f-37ce3e8d5760)
 
 
 ## TODO List
