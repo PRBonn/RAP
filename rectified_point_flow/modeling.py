@@ -67,6 +67,7 @@ class RectifiedPointFlow(L.LightningModule):
         save_results: bool = False,
         save_json: bool = True,
         save_pointcloud_parts: bool = False,
+        save_merged_pointcloud_steps: bool = False,
         max_samples_per_batch: int = None,
         encoder_on: bool = True,
         encoder_freeze: bool = True,
@@ -96,6 +97,7 @@ class RectifiedPointFlow(L.LightningModule):
         self.save_results = save_results
         self.save_json = save_json
         self.save_pointcloud_parts = save_pointcloud_parts
+        self.save_merged_pointcloud_steps = save_merged_pointcloud_steps
         self.max_samples_per_batch = max_samples_per_batch
         self.encoder_on = encoder_on
         self.encoder_freeze = encoder_freeze
@@ -115,7 +117,7 @@ class RectifiedPointFlow(L.LightningModule):
             )
 
         # Initialize
-        self.evaluator = Evaluator(self, save_pointcloud_parts=self.save_pointcloud_parts, max_samples_per_batch=self.max_samples_per_batch, rmse_eval_on=self.rmse_eval_on, folder_suffix=self.folder_suffix, save_json=self.save_json)
+        self.evaluator = Evaluator(self, save_pointcloud_parts=self.save_pointcloud_parts, save_merged_pointcloud_steps=self.save_merged_pointcloud_steps, max_samples_per_batch=self.max_samples_per_batch, rmse_eval_on=self.rmse_eval_on, folder_suffix=self.folder_suffix, save_json=self.save_json)
         self.meter = MetricsMeter(self)
         self.last_sample_counts = {}  # Store sample counts from last test epoch
         self.last_part_count_ranges = {}  # Store part count ranges from last test epoch
@@ -396,6 +398,8 @@ class RectifiedPointFlow(L.LightningModule):
                 translations_pred, 
                 save_results=self.save_results, 
                 generation_idx=gen_idx,
+                trajectory=trajs if self.save_merged_pointcloud_steps else None,
+                original_trajectory=trajs_x_t if self.save_merged_pointcloud_steps else None,
             )
             
             # Add metrics to meter for the first generation (to track sample counts)

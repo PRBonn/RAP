@@ -491,7 +491,7 @@ with gr.Blocks() as demo:
         # print(f"n_generations: {n_generations}, inference_sampling_steps: {inference_sampling_steps}")
     
     with gr.Row():
-        voxel_size = gr.Slider(minimum=0.01, maximum=0.4, value=0.25, step=0.01,
+        voxel_size = gr.Slider(minimum=0.001, maximum=0.4, value=0.25, step=0.001,
                               label="Voxel size (meters) [overwritten by adaptive parameters]")
         voxel_ratio = gr.Slider(minimum=0.02, maximum=2.0, value=0.2, step=0.01,
                                label="Voxel ratio for sampling")

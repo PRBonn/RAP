@@ -53,7 +53,9 @@ model:
   save_results: true     # save evaluation results to log_dir/results
   save_json: false        # save JSON files when save_results is true (set to false to skip JSON files)
   save_pointcloud_parts: false
+  save_merged_pointcloud_steps: true  # save merged point cloud at each generation step
   folder_suffix: ${visualizer.folder_suffix}
+  # max_samples_per_batch: 1
   max_samples_per_batch: ${visualizer.max_samples_per_batch}
   rmse_eval_on: false   # Enable RMSE evaluation for point cloud pairs (only works when max_parts=2)
   rigidity_forcing: true

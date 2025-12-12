@@ -17,9 +17,10 @@ from ..utils.render import part_ids_to_colors
 class Evaluator:
     """Evaluator for Rectified Point Flow model. """
     
-    def __init__(self, model: L.LightningModule, save_pointcloud_parts: bool = False, max_samples_per_batch: int = None, rmse_eval_on: bool = False, rmse_eval_on_transformed: bool = True, folder_suffix: str | None = None, save_json: bool = True):
+    def __init__(self, model: L.LightningModule, save_pointcloud_parts: bool = False, save_merged_pointcloud_steps: bool = False, max_samples_per_batch: int = None, rmse_eval_on: bool = False, rmse_eval_on_transformed: bool = True, folder_suffix: str | None = None, save_json: bool = True):
         self.model = model
         self.save_pointcloud_parts = save_pointcloud_parts
+        self.save_merged_pointcloud_steps = save_merged_pointcloud_steps
         self.max_samples_per_batch = max_samples_per_batch
         self.rmse_eval_on = rmse_eval_on
         self.rmse_eval_on_transformed = rmse_eval_on_transformed
@@ -290,6 +291,8 @@ class Evaluator:
         batch_idx: int = 0,
         rotations_pred: torch.Tensor = None,
         translations_pred: torch.Tensor = None,
+        trajectory: torch.Tensor | None = None,
+        original_trajectory: torch.Tensor | None = None,
     ):
         """Save a single evaluation result to JSON and PLY files.
 
@@ -348,6 +351,22 @@ class Evaluator:
         # Save PLY files (only for first k samples per batch if limit is set)
         if self.max_samples_per_batch is None or batch_idx < self.max_samples_per_batch:
             self._save_pointclouds_as_ply(data, pointclouds_pred, idx, sample_dir, dataset_name, sample_idx, generation_idx_str, rotations_pred, translations_pred)
+            # Create generation subfolder for merged point clouds if enabled
+            if self.save_merged_pointcloud_steps:
+                generation_dir = sample_dir / "generation"
+                generation_dir.mkdir(parents=True, exist_ok=True)
+                # Save merged input point cloud with colors if enabled
+                self._save_merged_input_pointcloud(data, idx, generation_dir)
+                # Save merged point clouds at each step if enabled
+                if trajectory is not None:
+                    endpoint_dir = generation_dir / "endpoint"
+                    endpoint_dir.mkdir(parents=True, exist_ok=True)
+                    self._save_merged_pointcloud_steps(data, trajectory, idx, endpoint_dir, trajectory_type="endpoint")
+                # Save original trajectory (x_t) if available
+                if original_trajectory is not None:
+                    midpoint_dir = generation_dir / "midpoint"
+                    midpoint_dir.mkdir(parents=True, exist_ok=True)
+                    self._save_merged_pointcloud_steps(data, original_trajectory, idx, midpoint_dir, trajectory_type="midpoint")
         
         # Extract global transformations if available
         global_rotation = None
@@ -656,6 +675,155 @@ class Evaluator:
             logger = logging.getLogger("Evaluator")
             logger.error(f"Error saving part PLY files for sample {sample_idx}: {e}")
 
+    def _save_merged_input_pointcloud(
+        self,
+        data: Dict[str, Any],
+        idx: int,
+        generation_dir: Path,
+    ):
+        """Save merged input point cloud with part-wise colors as input.pcd.
+        
+        Args:
+            data: Input data dictionary.
+            idx: Index of the sample in the batch.
+            generation_dir: Generation directory to save PCD files.
+        """
+        try:
+            if o3d is None:
+                import logging
+                logger = logging.getLogger("Evaluator")
+                logger.warning("Open3D not available, skipping merged input point cloud saving")
+                return
+            
+            # Handle dynamic vs fixed batching for input point clouds
+            if "cu_seqlens_batch" in data:
+                # Dynamic batching
+                cu_seqlens_batch = data["cu_seqlens_batch"]
+                start_idx = cu_seqlens_batch[idx]
+                end_idx = cu_seqlens_batch[idx + 1]
+                
+                pts_input = data["pointclouds"][start_idx:end_idx].detach().cpu()
+                num_points = end_idx - start_idx
+            else:
+                # Fixed batching
+                points_per_part = data["points_per_part"][idx]
+                num_points = int(points_per_part.sum().item())
+                
+                # Reshape from (B, N, 3) and take valid points
+                B = data["pointclouds"].shape[0]
+                N = data["pointclouds"].shape[1] // B if len(data["pointclouds"].shape) == 2 else data["pointclouds"].shape[1]
+                
+                pts_input = data["pointclouds"].view(B, N, 3)[idx][:num_points].detach().cpu()
+            
+            # Keep points in canonical frame (no scaling)
+            
+            # Get points_per_part for this sample to generate part IDs and colors
+            points_per_part = data["points_per_part"][idx].cpu()
+            
+            # Generate part IDs from points_per_part
+            part_ids = ppp_to_ids(points_per_part.unsqueeze(0))[0]  # Add batch dim and remove it
+            part_ids = part_ids[:num_points].cpu()  # Trim to actual number of points
+            
+            # Get part-wise colors (same as used in _save_parts_pointclouds)
+            colors = part_ids_to_colors(part_ids, colormap="default", part_order="id").cpu()
+            
+            # Create merged point cloud with part-wise colors
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pts_input.numpy().astype(float))
+            pcd.colors = o3d.utility.Vector3dVector(colors.numpy().astype(float))
+            
+            # Save merged input point cloud as input.pcd
+            input_path = generation_dir / "input.pcd"
+            o3d.io.write_point_cloud(str(input_path), pcd, write_ascii=False)
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("Evaluator")
+            logger.error(f"Error saving merged input point cloud: {e}")
+
+    def _save_merged_pointcloud_steps(
+        self,
+        data: Dict[str, Any],
+        trajectory: torch.Tensor,
+        idx: int,
+        output_dir: Path,
+        trajectory_type: str = "endpoint",
+    ):
+        """Save merged point cloud at each step of the generation trajectory as step_0.pcd, step_1.pcd, etc.
+        
+        Args:
+            data: Input data dictionary.
+            trajectory: Trajectory tensor of shape (num_steps, TP, 3) containing point clouds at each step.
+            idx: Index of the sample in the batch.
+            output_dir: Directory to save PCD files (endpoint or midpoint subfolder).
+            trajectory_type: Type of trajectory - "endpoint" for x_0_hat or "midpoint" for x_t.
+        """
+        try:
+            if o3d is None:
+                import logging
+                logger = logging.getLogger("Evaluator")
+                logger.warning("Open3D not available, skipping merged point cloud step saving")
+                return
+            
+            # Handle dynamic vs fixed batching
+            if "cu_seqlens_batch" in data:
+                # Dynamic batching
+                cu_seqlens_batch = data["cu_seqlens_batch"]
+                start_idx = cu_seqlens_batch[idx]
+                end_idx = cu_seqlens_batch[idx + 1]
+                num_points = end_idx - start_idx
+            else:
+                # Fixed batching
+                points_per_part = data["points_per_part"][idx]
+                num_points = int(points_per_part.sum().item())
+            
+            # Get points_per_part for this sample to generate part IDs and colors
+            points_per_part = data["points_per_part"][idx].cpu()
+            
+            # Generate part IDs from points_per_part
+            part_ids = ppp_to_ids(points_per_part.unsqueeze(0))[0]  # Add batch dim and remove it
+            part_ids = part_ids[:num_points].cpu()  # Trim to actual number of points
+            
+            # Get part-wise colors (same as used in _save_parts_pointclouds)
+            colors = part_ids_to_colors(part_ids, colormap="default", part_order="id").cpu()
+            
+            # Extract trajectory steps for this sample
+            # trajectory shape: (num_steps, TP, 3) for dynamic batching or (num_steps, B, N, 3) for fixed batching
+            num_steps = trajectory.shape[0]
+            
+            for step_idx in range(num_steps):
+                # Extract points for this sample at this step
+                if "cu_seqlens_batch" in data:
+                    # Dynamic batching: trajectory shape is (num_steps, TP, 3)
+                    step_points = trajectory[step_idx, start_idx:end_idx].detach().cpu()
+                else:
+                    # Fixed batching: trajectory shape might be (num_steps, B*N, 3) or (num_steps, B, N, 3)
+                    B = data["points_per_part"].shape[0]
+                    if len(trajectory.shape) == 3:
+                        # Shape is (num_steps, B*N, 3) - need to reshape
+                        N = trajectory.shape[1] // B
+                        step_points = trajectory[step_idx].view(B, N, 3)[idx][:num_points].detach().cpu()
+                    else:
+                        # Shape is already (num_steps, B, N, 3)
+                        step_points = trajectory[step_idx, idx, :num_points].detach().cpu()
+                
+                # Keep points in canonical frame (no scaling)
+                
+                # Create merged point cloud with part-wise colors
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(step_points.numpy().astype(float))
+                pcd.colors = o3d.utility.Vector3dVector(colors.numpy().astype(float))
+                
+                # Save merged point cloud as step_{step_idx}.pcd
+                step_filename = f"step_{step_idx}.pcd"
+                step_path = output_dir / step_filename
+                o3d.io.write_point_cloud(str(step_path), pcd, write_ascii=False)
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("Evaluator")
+            logger.error(f"Error saving merged point cloud steps: {e}")
+
     def run(
         self,
         data: Dict[str, Any],
@@ -664,6 +832,8 @@ class Evaluator:
         translations_pred: torch.Tensor | None = None,
         save_results: bool = False,
         generation_idx: int | str = 0,
+        trajectory: torch.Tensor | None = None,
+        original_trajectory: torch.Tensor | None = None,
     ):
         """Run evaluation and optionally save results.
 
@@ -683,6 +853,10 @@ class Evaluator:
             save_results (bool): If True, save each result to log_dir/results.
             generation_idx (int | str): The index of the generation (mainly for best-of-n generations).
                 Can be an int (0, 1, 2, ...) or a string like "selected" for special cases.
+            trajectory (num_steps, TP, 3), optional: End-point trajectory tensor (x_0_hat) containing point clouds at each generation step.
+                Used for saving merged point clouds at each step when save_merged_pointcloud_steps is enabled.
+            original_trajectory (num_steps, TP, 3), optional: Original trajectory tensor (x_t) containing point clouds at each generation step.
+                Used for saving merged point clouds at each step when save_merged_pointcloud_steps is enabled.
 
         Returns:
             A dictionary with:
@@ -713,5 +887,5 @@ class Evaluator:
         if save_results:
             B = data["points_per_part"].size(0)
             for i in range(B):
-                self._save_single_result(data, metrics, pointclouds_pred, i, generation_idx, batch_idx=i, rotations_pred=rotations_pred, translations_pred=translations_pred)
+                self._save_single_result(data, metrics, pointclouds_pred, i, generation_idx, batch_idx=i, rotations_pred=rotations_pred, translations_pred=translations_pred, trajectory=trajectory, original_trajectory=original_trajectory)
         return metrics
