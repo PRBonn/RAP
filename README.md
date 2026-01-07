@@ -29,7 +29,7 @@
     <a href="https://gradientspaces.stanford.edu/"><strong>Stanford University</strong></a>
 
 
-  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://52d7a5fe3825358bb9.gradio.live/">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a></h3>
+  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://e54e9b87942faf567b.gradio.live/">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a></h3>
   <div align="center"></div>
 </p>
 
