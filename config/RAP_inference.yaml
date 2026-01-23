@@ -1,7 +1,7 @@
 # Inference demo
 
 defaults:
-  - model: rap_10
+  - model: rap_12
   - data: data_tmp
   - trainer: infer
   - loggers: wandb
@@ -21,9 +21,6 @@ hydra:
 
 visualizer:
   folder_suffix: null
-  filter_failures: false
-  failure_metric: "recall_at_5deg_2m (outdoor_bufferx)"
-  failure_generation_idx: 0
   max_samples_per_batch: 0
 
 # Data
@@ -33,10 +30,10 @@ data:
   batch_size: 1
   num_workers: 1
   min_parts: 2
-  max_parts: 64
+  max_parts: 512
   min_points_per_part: 200
   max_points_per_part: 40000
-  max_points_per_batch: 80000
+  max_points_per_batch: 400000
 
 # Log directory
 log_dir: ./demo_new/
@@ -55,8 +52,8 @@ model:
   save_pointcloud_parts: false
   save_merged_pointcloud_steps: true  # save merged point cloud at each generation step
   folder_suffix: ${visualizer.folder_suffix}
-  # max_samples_per_batch: 1
-  max_samples_per_batch: ${visualizer.max_samples_per_batch}
+  max_samples_per_batch: 1
+  # max_samples_per_batch: ${visualizer.max_samples_per_batch}
   rmse_eval_on: false   # Enable RMSE evaluation for point cloud pairs (only works when max_parts=2)
   rigidity_forcing: true
   return_end_point_trajectory: true

@@ -1,0 +1,10 @@
+_target_: rectified_point_flow.flow_model.PointCloudDiT
+in_dim: 0 # set to 0 when using encoder_on = False
+out_dim: 3
+embed_dim: 512 # originally 512
+num_layers: 12 # originally 6
+num_heads: 8 # originally 8
+dropout_rate: 0.0
+scale_emb_on: true
+local_feat_concat_on: true
+local_feat_dim: 32

@@ -105,6 +105,8 @@ class PointCloudEncodingManager(nn.Module):
             num_freqs=multires,
         )
 
+        # Do not concatenate the view idx embedding to keep the pertubation equivariance and then can handle a flexible number of input views.
+
         # Embedding projection
         embed_input_dim = (
             self.in_dim

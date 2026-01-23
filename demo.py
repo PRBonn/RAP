@@ -38,6 +38,11 @@ from dataset_process.utils.io_utils import CMAP_DEFAULT
 from dataset_process.extract_sample_features import FeatureExtractor, SampleProcessor
 from dataset_process.utils.processing_utils import set_random_seeds
 from dataset_process.utils.io_utils import save_processed_sample
+from dataset_process.utils.point_sampling_utils import (
+    calculate_voxel_coverage,
+    allocate_fps_points,
+    calculate_adaptive_sample_count_per_part
+)
 import hydra
 
 logger = logging.getLogger(__name__)
@@ -146,7 +151,10 @@ def process_point_clouds(loaded_point_clouds: List[Tuple[str, np.ndarray, Option
                         min_points_per_part: int = 200,
                         max_points_per_part: int = 20000,
                         global_seed: int = 42,
-                        use_torch_downsampling: bool = True) -> str:
+                        use_torch_downsampling: bool = True,
+                        feature_extraction_on: bool = True,
+                        use_random_downsample: bool = False,
+                        target_points_per_scan: Optional[int] = None) -> str:
     """
     Process loaded point clouds: downsample, extract features, and save.
     
@@ -171,6 +179,9 @@ def process_point_clouds(loaded_point_clouds: List[Tuple[str, np.ndarray, Option
         max_points_per_part: Maximum points per part
         global_seed: Random seed
         use_torch_downsampling: Use torch-based voxel downsampling for speedup
+        use_random_downsample: If True, use random downsampling instead of FPS (default: False)
+        target_points_per_scan: Target number of points per scan for random downsampling.
+                                If None, uses allocation_method to determine target points (default: None)
         
     Returns:
         Path to the created sample folder
@@ -181,28 +192,57 @@ def process_point_clouds(loaded_point_clouds: List[Tuple[str, np.ndarray, Option
     logger.info(f"Processing {len(loaded_point_clouds)} point clouds...")
     
     # Initialize feature extractor if not provided
+    # If feature_extraction_on is False, skip feature extraction (features will be set to zero vectors)
     if feature_extractor is None:
-        model_config = {
-            'num_points_per_patch': 512,
-            'is_aligned_to_global_z': is_aligned_to_global_z,
-            'des_r': des_r,
-        }
-        feature_extractor = FeatureExtractor(
-            model_config=model_config,
-            des_r=des_r,
-            is_aligned_to_global_z=is_aligned_to_global_z,
-            checkpoint_path=checkpoint_path,
-            device='auto'
-        )
+        if not feature_extraction_on:
+            logger.info("Feature extraction disabled: features will be set to zero vectors")
+            # Create a dummy feature extractor that returns zero features
+            class ZeroFeatureExtractor:
+                def __init__(self, feature_dim=32):
+                    self.feature_dim = feature_dim
+                    self.device = 'cpu'
+                
+                def extract_features(self, points, keypoints=None):
+                    if keypoints is None:
+                        keypoints = points
+                    points_is_tensor = isinstance(keypoints, torch.Tensor)
+                    keypoint_len = keypoints.shape[0] if keypoints.dim() > 1 else len(keypoints)
+                    
+                    if points_is_tensor:
+                        empty_features = torch.zeros(keypoint_len, self.feature_dim, device=keypoints.device)
+                    else:
+                        empty_features = np.zeros((keypoint_len, self.feature_dim))
+                    
+                    return {
+                        'features': empty_features,
+                        'keypoints': keypoints,
+                    }
+            
+            feature_extractor = ZeroFeatureExtractor(feature_dim=32)
+        else:
+            model_config = {
+                'num_points_per_patch': 512,
+                'is_aligned_to_global_z': is_aligned_to_global_z,
+                'des_r': des_r,
+            }
+            feature_extractor = FeatureExtractor(
+                model_config=model_config,
+                des_r=des_r,
+                is_aligned_to_global_z=is_aligned_to_global_z,
+                checkpoint_path=checkpoint_path,
+                device='auto'
+            )
     
-    allocated_voxel_size = 4 * voxel_size
+    allocated_voxel_size = 4.0 * voxel_size # adaptively set
 
     # Initialize sample processor if not provided
+    # If using random downsampling, skip point sampling in SampleProcessor
+    skip_point_sampling = use_random_downsample
     if sample_processor is None:
         sample_processor = SampleProcessor(
             feature_extractor=feature_extractor,
             num_points=5000,  # Default, will be overridden by allocation_method
-            skip_point_sampling=False,
+            skip_point_sampling=skip_point_sampling,
             remove_outliers=remove_outliers,
             outlier_nb_neighbors=outlier_nb_neighbors,
             outlier_std_ratio=outlier_std_ratio,
@@ -253,15 +293,81 @@ def process_point_clouds(loaded_point_clouds: List[Tuple[str, np.ndarray, Option
     if not parts_points:
         raise ValueError("No valid point clouds found after processing")
     
+    # Apply random downsampling if enabled
+    if use_random_downsample:
+        logger.info("Applying random downsampling to each scan...")
+        start_time_random_downsample = get_time()
+        
+        # Calculate target points per scan
+        if target_points_per_scan is not None:
+            # Use fixed target for all scans
+            target_per_scan = [target_points_per_scan] * len(parts_points)
+        else:
+            # Use allocation method to determine target points per scan
+            if allocation_method == 'voxel_adaptive':
+                target_per_scan = calculate_adaptive_sample_count_per_part(
+                    parts_points, allocated_voxel_size, voxel_ratio, 
+                    min_points_per_part, max_points_per_part
+                )
+            elif allocation_method == 'point_count':
+                # Use point_count allocation with default num_points
+                pts_per_part = np.array([len(part) for part in parts_points])
+                target_per_scan = allocate_fps_points(
+                    pts_per_part, allocation_method, 5000, 
+                    min_points_per_part, allocated_voxel_size, voxel_ratio
+                )
+            elif allocation_method == 'spatial_coverage':
+                target_per_scan = allocate_fps_points(
+                    parts_points, allocation_method, 5000,
+                    min_points_per_part, allocated_voxel_size, voxel_ratio
+                )
+            else:
+                raise ValueError(f"Unknown allocation method: {allocation_method}")
+        
+        # Apply random downsampling to each scan
+        np.random.seed(global_seed)
+        randomly_downsampled_points = []
+        randomly_downsampled_normals = []
+        
+        for i, (points, normals, target_points) in enumerate(zip(parts_points, parts_normals, target_per_scan)):
+            num_points = len(points)
+            target = min(int(target_points), num_points)  # Don't exceed available points
+            
+            if target < num_points:
+                # Randomly sample target points
+                indices = np.random.choice(num_points, size=target, replace=False)
+                indices = np.sort(indices)  # Keep original order for consistency
+                randomly_downsampled_points.append(points[indices])
+                if normals is not None:
+                    randomly_downsampled_normals.append(normals[indices])
+                else:
+                    randomly_downsampled_normals.append(None)
+                logger.info(f"  Scan {i+1} ({part_names[i]}): {num_points} -> {target} points (random downsampling)")
+            else:
+                # Keep all points if target >= available points
+                randomly_downsampled_points.append(points)
+                randomly_downsampled_normals.append(normals)
+                logger.info(f"  Scan {i+1} ({part_names[i]}): {num_points} points (no downsampling needed)")
+        
+        parts_points = randomly_downsampled_points
+        parts_normals = randomly_downsampled_normals
+        
+        elapsed_time_random_downsample = get_time() - start_time_random_downsample
+        logger.info(f"Random downsampling time: {elapsed_time_random_downsample:.2f} seconds")
+    
     logger.info(f"Processing {len(parts_points)} parts for feature extraction...")
     
-    # Process sample using SampleProcessor (includes FPS and feature extraction)
+    # Process sample using SampleProcessor (includes FPS and feature extraction, or just feature extraction if random downsampling is used)
     start_time_sample_processor = get_time()
     
     part_results = sample_processor.process_sample(parts_points, parts_normals)
     
     elapsed_time_sample_processor = get_time() - start_time_sample_processor
-    logger.info(f"Sample processor time (FPS + feature extraction): {elapsed_time_sample_processor:.2f} seconds")
+    if use_random_downsample:
+        logger.info(f"Sample processor time (feature extraction only): {elapsed_time_sample_processor:.2f} seconds")
+    else:
+        # Separate FPS and feature extraction times are logged by SampleProcessor at INFO level
+        logger.info(f"Total sample processor time: {elapsed_time_sample_processor:.2f} seconds")
     
     if not part_results:
         raise ValueError("No parts returned from processing")
@@ -461,10 +567,15 @@ def main():
                         help='Ratio for voxel_adaptive allocation (default: 0.1)')
     parser.add_argument('--min_points_per_part', type=int, default=200,
                         help='Minimum points per part (default: 200)')
-    parser.add_argument('--max_points_per_part', type=int, default=10000,
-                        help='Maximum points per part (default: 10000)')
+    parser.add_argument('--max_points_per_part', type=int, default=20000,
+                        help='Maximum points per part (default: 20000)')
     parser.add_argument('--global_seed', type=int, default=42,
                         help='Random seed (default: 42)')
+    parser.add_argument('--use_random_downsample', action='store_true', default=False,
+                        help='Use random downsampling instead of FPS (default: False)')
+    parser.add_argument('--target_points_per_scan', type=int, default=None,
+                        help='Target number of points per scan for random downsampling. '
+                             'If None, uses allocation_method to determine target points (default: None)')
     
     # Inference
     parser.add_argument('--flow_model_checkpoint', type=str, default='./weights/rap_model.ckpt',
@@ -472,7 +583,7 @@ def main():
     parser.add_argument('--config', type=str, default='RAP_inference',
                         help='Config name for inference (default: RAP_inference)')
     parser.add_argument('--model', type=str, default=None,
-                        choices=['rap_10', 'rap_12'],
+                        choices=['rap_10', 'rap_12', 'rap_12_po'],
                         help='Model configuration to use (default: None, uses config default)')
     parser.add_argument('--rigidity_forcing', action='store_true', default=True,
                         help='Enable rigidity forcing in flow model (default: True)')
@@ -486,7 +597,9 @@ def main():
                         help='Skip inference and only process point clouds')
     parser.add_argument('--visualize', '-v', action='store_true', default=False,
                         help='Visualize registered point clouds after inference (requires inference to complete)')
-    parser.add_argument('--point_size', type=float, default=3.0,
+    parser.add_argument('--use_original_colors', action='store_true', default=True,
+                        help='Use original RGB colors from PLY files instead of scan index colors for visualization')
+    parser.add_argument('--point_size', type=float, default=4.0,
                         help='Point size for visualization (default: 3.0)')
     parser.add_argument('--background_color', type=float, nargs=3, default=[1.0, 1.0, 1.0],
                         help='Background color as R G B values in [0,1] (default: 1.0 1.0 1.0 - white)')
@@ -502,6 +615,12 @@ def main():
                         help='Do not clean up temporary dataset folder after processing')
     parser.add_argument('--save_trajectory', action='store_true', default=False,
                         help='Save trajectory as GIF animation (default: False)')
+    parser.add_argument('--output_generated', action='store_true', default=False,
+                        help='Output the scaled and transformed generated point clouds instead of applying transformations to original point clouds (default: False)')
+    parser.add_argument('--save_merged_pointcloud_steps', action='store_true', default=None,
+                        help='Save merged point cloud at each generation step (default: None, uses config default)')
+    parser.add_argument('--no_save_merged_pointcloud_steps', dest='save_merged_pointcloud_steps', action='store_false',
+                        help='Disable saving merged point cloud at each generation step')
 
     
     # Logging
@@ -634,8 +753,12 @@ def main():
         ply_path = os.path.join(args.input, ply_file)
         part_name = os.path.splitext(ply_file)[0]
         
-        # Load point cloud
-        points, normals = load_ply_file(ply_path)
+        # Load point cloud once (extract points, normals, and colors)
+        pcd = o3d.io.read_point_cloud(ply_path)
+        points = np.asarray(pcd.points)
+        normals = np.asarray(pcd.normals) if pcd.has_normals() else None
+        has_colors = pcd.has_colors() and len(np.asarray(pcd.colors)) > 0
+        original_colors = pcd.colors if has_colors else None
         
         if len(points) == 0:
             logger.warning(f"Skipping empty point cloud: {ply_file}")
@@ -658,10 +781,15 @@ def main():
         if normals is not None:
             pcd_vis.normals = o3d.utility.Vector3dVector(normals.copy())
         
-        # Add colors for consistent visualization
-        idx = len(visualization_pcds)
-        rgb = CMAP_DEFAULT[idx % len(CMAP_DEFAULT)]
-        pcd_vis.paint_uniform_color(rgb)
+        # Add colors for visualization
+        if args.use_original_colors and has_colors:
+            # Use original colors from PLY file
+            pcd_vis.colors = original_colors
+        else:
+            # Use scan index colors for consistent visualization
+            idx = len(visualization_pcds)
+            rgb = CMAP_DEFAULT[idx % len(CMAP_DEFAULT)]
+            pcd_vis.paint_uniform_color(rgb)
         
         visualization_pcds.append(pcd_vis)
         
@@ -704,12 +832,87 @@ def main():
         logger.info(f"Median bounding box dimensions: x={median_x:.3f}, y={median_y:.3f}, z={median_z:.3f}")
         logger.info(f"Median size (across x,y,z): {median_size:.3f}")
         
-        # Set adaptive voxel_size: median / 500, bounded by [0.01, 0.4]
-        adaptive_voxel_size = median_size / 500.0
-        adaptive_voxel_size = max(0.01, min(0.4, adaptive_voxel_size))
+        # Set adaptive voxel_size: median / 600, bounded by [min_voxel_size, max_voxel_size]
+        if median_size < 5.0: # indoor scene or object 
+            divide_factor = 200.0
+        elif median_size < 30.0: # indoor scene
+            divide_factor = 400.0
+        elif median_size < 100.0: # outdoor scene
+            divide_factor = 600.0
+        elif median_size < 250.0: # outdoor large scene
+            divide_factor = 800.0
+        elif median_size < 500.0: # outdoor large scene
+            divide_factor = 1000.0
+        else: # outdoor very large scene
+            divide_factor = 1200.0
+        adaptive_voxel_size = median_size / divide_factor
+        min_voxel_size = 0.0001
+        max_voxel_size = 0.4
+        adaptive_voxel_size = max(min_voxel_size, min(max_voxel_size, adaptive_voxel_size))
         
         # Set adaptive des_r: 20 * voxel_size
         adaptive_des_r = 20.0 * adaptive_voxel_size
+        
+        # Calculate allocated_voxel_size (used for voxel coverage calculation)
+        allocated_voxel_size = 4.0 * adaptive_voxel_size
+        
+        # Calculate voxel coverage for each part to determine adaptive voxel_ratio
+        logger.info("Calculating voxel coverage for adaptive voxel_ratio...")
+        voxel_coverages = []
+        for part_name, points, normals in loaded_point_clouds:
+            if len(points) == 0:
+                continue
+            voxel_coverage = calculate_voxel_coverage(points, allocated_voxel_size)
+            voxel_coverages.append(voxel_coverage)
+            logger.debug(f"  {part_name}: {voxel_coverage} occupied voxels")
+        
+        if not voxel_coverages:
+            logger.error("No valid voxel coverages calculated for adaptive voxel_ratio")
+            return 1
+        
+        # Calculate median voxel coverage
+        median_voxel_coverage = np.median(voxel_coverages)
+        logger.info(f"Median voxel coverage: {median_voxel_coverage:.0f} occupied voxels")
+        
+        # Calculate current median point count with current voxel_ratio
+        # target_point_count = voxel_coverage * voxel_ratio
+        current_median_point_count = median_voxel_coverage * args.voxel_ratio
+        logger.info(f"Current median point count (with voxel_ratio={args.voxel_ratio:.6f}): {current_median_point_count:.0f}")
+        
+        voxel_ratio_adjusted = False
+        adjustment_reason = None
+        adaptive_voxel_ratio = args.voxel_ratio
+        
+        # Adjust voxel_ratio if median point count is larger than 15000
+        target_median_point_count_max = 15000.0
+        if current_median_point_count > target_median_point_count_max:
+            # Calculate adaptive voxel_ratio to achieve target median point count
+            # voxel_ratio = target_point_count / voxel_coverage
+            adaptive_voxel_ratio = target_median_point_count_max / median_voxel_coverage
+            args.voxel_ratio = adaptive_voxel_ratio
+            voxel_ratio_adjusted = True
+            adjustment_reason = f"median point count ({current_median_point_count:.0f}) > {target_median_point_count_max:.0f}"
+            logger.info(f"Adjusting voxel_ratio to {adaptive_voxel_ratio:.6f} to achieve target median point count of {target_median_point_count_max:.0f}")
+            # Recalculate median point count with adjusted voxel_ratio
+            current_median_point_count = median_voxel_coverage * adaptive_voxel_ratio
+        
+        # Adjust voxel_ratio only if median point count is smaller than 1000
+        target_median_point_count_min = 1000.0
+        if current_median_point_count < target_median_point_count_min:
+            # Calculate adaptive voxel_ratio to achieve target median point count
+            # voxel_ratio = target_point_count / voxel_coverage
+            adaptive_voxel_ratio = target_median_point_count_min / median_voxel_coverage
+            args.voxel_ratio = adaptive_voxel_ratio
+            voxel_ratio_adjusted = True
+            if adjustment_reason:
+                adjustment_reason += f" and median point count ({current_median_point_count:.0f}) < {target_median_point_count_min:.0f}"
+            else:
+                adjustment_reason = f"median point count ({current_median_point_count:.0f}) < {target_median_point_count_min:.0f}"
+            logger.info(f"Adjusting voxel_ratio to {adaptive_voxel_ratio:.6f} to achieve target median point count of {target_median_point_count_min:.0f}")
+        elif not voxel_ratio_adjusted:
+            # Keep current voxel_ratio if no adjustments were made
+            adaptive_voxel_ratio = args.voxel_ratio
+            logger.info(f"Keeping current voxel_ratio ({args.voxel_ratio:.6f}) as median point count ({current_median_point_count:.0f}) is between {target_median_point_count_min:.0f} and {target_median_point_count_max:.0f}")
         
         # Override parameters
         args.voxel_size = adaptive_voxel_size
@@ -719,6 +922,10 @@ def main():
         logger.info("Adaptively set parameters:")
         logger.info(f"  voxel_size = {adaptive_voxel_size:.6f}")
         logger.info(f"  des_r = {adaptive_des_r:.6f}")
+        if voxel_ratio_adjusted:
+            logger.info(f"  voxel_ratio = {adaptive_voxel_ratio:.6f} (adjusted due to: {adjustment_reason})")
+        else:
+            logger.info(f"  voxel_ratio = {adaptive_voxel_ratio:.6f} (unchanged, median point count: {current_median_point_count:.0f} is between {target_median_point_count_min:.0f} and {target_median_point_count_max:.0f})")
         logger.info("=" * 60)
     
     # Setup output folder (default to current directory)
@@ -753,6 +960,10 @@ def main():
         logger.info("Starting preprocessing (point sampling and feature extraction)...")
         start_time_preprocessing = get_time()
         
+        # Determine if feature extraction should be enabled
+        # For rap_12_po model, disable feature extraction
+        feature_extraction_on = args.model != 'rap_12_po' if args.model else True
+        
         sample_output_dir = process_point_clouds(
             loaded_point_clouds=loaded_point_clouds,
             output_folder=dataset_folder,  # Save directly to dataset folder
@@ -768,6 +979,9 @@ def main():
             min_points_per_part=args.min_points_per_part,
             max_points_per_part=args.max_points_per_part,
             global_seed=args.global_seed,
+            feature_extraction_on=feature_extraction_on,
+            use_random_downsample=args.use_random_downsample,
+            target_points_per_scan=args.target_points_per_scan,
         )
         
         elapsed_time_preprocessing = get_time() - start_time_preprocessing
@@ -821,6 +1035,13 @@ def main():
                 # Set max_samples_per_batch to 1 when save_trajectory is enabled
                 if args.save_trajectory:
                     overrides.append(f'visualizer.max_samples_per_batch=1')
+                # Enable save_pointcloud_parts when output_generated is enabled
+                if args.output_generated:
+                    overrides.append(f'model.save_pointcloud_parts=true')
+                    logger.info("Enabled save_pointcloud_parts to save generated point cloud parts")
+                # Set save_merged_pointcloud_steps if specified
+                if args.save_merged_pointcloud_steps is not None:
+                    overrides.append(f'model.save_merged_pointcloud_steps={str(args.save_merged_pointcloud_steps).lower()}')
                 
                 model_name = args.model if args.model else "default (from config)"
                 logger.info(f"Flow matching parameters: model={model_name}, n_generations={args.n_generations}, inference_steps={args.inference_sampling_steps}")
@@ -867,7 +1088,10 @@ def main():
                 
                 # Apply transformations and save registered point clouds
                 logger.info("=" * 60)
-                logger.info("STEP 3: Applying transformations and saving registered point clouds")
+                if args.output_generated:
+                    logger.info("STEP 3: Loading and saving generated point clouds")
+                else:
+                    logger.info("STEP 3: Applying transformations and saving registered point clouds")
                 logger.info("=" * 60)
                 
                 import glob as glob_module
@@ -952,74 +1176,189 @@ def main():
                             global_transform_file = file
                             break
                     
-                    # Load part-specific transformations and apply to point clouds
                     registered_pcds = []
-
-                    T_part_reference = np.eye(4)
                     
-                    for idx, (pcd_original, part_name) in enumerate(zip(original_pcds, part_names)):
-                        # Find part-specific transform file
-                        part_transform_file = None
+                    if args.output_generated:
+                        # Load generated point clouds instead of transforming original ones
+                        logger.info(f"Loading generated point clouds from results directory...")
                         
-                        # Try to find by part number in filename
-                        part_match = re.search(r'part(\d+)', part_name, re.IGNORECASE)
-                        if part_match:
-                            part_num = part_match.group(1)
-                            pattern = f"*{generation_str}_part{part_num:0>2}_transform.txt"
-                            for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
-                                part_transform_file = file
+                        # Find generated PLY files matching the generation pattern
+                        generated_patterns = [
+                            f"*{generation_str}_part*.ply",
+                            f"*{generation_str}*part*.ply",
+                        ]
+                        
+                        # If generation_selected not found, try generation00
+                        if generation_str == "generation_selected":
+                            generated_patterns.extend([
+                                "*generation00_part*.ply",
+                                "*generation*_part*.ply",
+                            ])
+                        
+                        generated_ply_files = []
+                        for pattern in generated_patterns:
+                            found_files = glob_module.glob(os.path.join(results_vis_dir, pattern))
+                            if found_files:
+                                generated_ply_files = found_files
+                                logger.info(f"Found {len(found_files)} generated PLY files matching pattern: {pattern}")
                                 break
                         
-                        # If not found, try by index
-                        if part_transform_file is None:
-                            pattern = f"*{generation_str}_part{idx:02d}_transform.txt"
-                            for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
-                                part_transform_file = file
-                                break
+                        if not generated_ply_files:
+                            logger.warning(f"No generated PLY files found in {results_vis_dir}")
+                            logger.warning("Make sure --output_generated was specified before inference, or enable model.save_pointcloud_parts in config")
+                        else:
+                            # Extract part numbers and sort by part number
+                            ply_files_with_parts = []
+                            for ply_file in generated_ply_files:
+                                basename = os.path.basename(ply_file)
+                                # Extract part number from filename (e.g., part00, part01, etc.)
+                                part_match = re.search(r'part(\d+)', basename)
+                                if part_match:
+                                    part_num = int(part_match.group(1))
+                                    ply_files_with_parts.append((part_num, ply_file))
+                                else:
+                                    # If no part number found, use index
+                                    ply_files_with_parts.append((len(ply_files_with_parts), ply_file))
+                            
+                            # Sort by part number
+                            ply_files_with_parts.sort(key=lambda x: x[0])
+                            
+                            # Load generated point clouds
+                            for idx, (part_num, ply_file) in enumerate(ply_files_with_parts):
+                                try:
+                                    pcd_generated = o3d.io.read_point_cloud(ply_file)
+                                    points = np.asarray(pcd_generated.points)
+                                    
+                                    if len(points) == 0:
+                                        logger.warning(f"Empty generated point cloud: {os.path.basename(ply_file)}")
+                                        continue
+                                    
+                                    # Use the same color scheme as original point clouds
+                                    if idx < len(CMAP_DEFAULT):
+                                        rgb = CMAP_DEFAULT[idx % len(CMAP_DEFAULT)]
+                                        pcd_generated.paint_uniform_color(rgb)
+                                    
+                                    # Compute normals for generated point clouds if needed for visualization
+                                    if args.visualize and args.show_normals and not pcd_generated.has_normals():
+                                        bbox = pcd_generated.get_axis_aligned_bounding_box()
+                                        extent = bbox.get_extent()
+                                        normal_radius = max(np.mean(extent) * 0.005, 0.05)
+                                        pcd_generated.estimate_normals(
+                                            search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                                                radius=normal_radius, max_nn=15
+                                            )
+                                        )
+                                        pcd_generated.orient_normals_consistent_tangent_plane(k=15)
+                                    
+                                    registered_pcds.append(pcd_generated)
+                                    logger.info(f"Loaded generated point cloud: {os.path.basename(ply_file)} ({len(points)} points)")
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Error loading generated point cloud {ply_file}: {e}")
+                                    continue
+                            
+                            logger.info(f"Loaded {len(registered_pcds)} generated point clouds")
+                            
+                            # Save generated point clouds to registered folder (parallel to generation subfolder)
+                            registered_output_dir = os.path.join(results_vis_dir, "registered")
+                            os.makedirs(registered_output_dir, exist_ok=True)
+                            
+                            for idx, (pcd_generated, part_name) in enumerate(zip(registered_pcds, part_names[:len(registered_pcds)])):
+                                # Create output filename based on part name and generation
+                                part_basename = os.path.splitext(part_name)[0]
+                                registered_filename = f"{part_basename}_{generation_str}_registered.ply"
+                                registered_filepath = os.path.join(registered_output_dir, registered_filename)
+                                
+                                # Save point cloud
+                                o3d.io.write_point_cloud(registered_filepath, pcd_generated, write_ascii=False)
+                                logger.info(f"Saved generated point cloud: {registered_filename}")
+                            
+                            logger.info(f"Saved {len(registered_pcds)} generated point clouds to {registered_output_dir}")
+                            
+                            # Clean up temporary PLY files saved by save_pointcloud_parts
+                            logger.info("Cleaning up temporary PLY files from sample directory...")
+                            cleanup_patterns = [
+                                "*generation*_part*.ply",  # All generation part files
+                                "*_input_part*.ply",        # Input part files
+                                "*_gt_part*.ply",           # Ground truth part files
+                            ]
+                            cleaned_count = 0
+                            for pattern in cleanup_patterns:
+                                for ply_file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
+                                    try:
+                                        os.remove(ply_file)
+                                        cleaned_count += 1
+                                    except Exception as e:
+                                        logger.warning(f"Failed to remove {ply_file}: {e}")
+                            if cleaned_count > 0:
+                                logger.info(f"Cleaned up {cleaned_count} temporary PLY files")
+                    else:
+                        # Original behavior: Load part-specific transformations and apply to point clouds
+                        T_part_reference = np.eye(4)
                         
-                        # If still not found, try without generation suffix
-                        if part_transform_file is None:
+                        for idx, (pcd_original, part_name) in enumerate(zip(original_pcds, part_names)):
+                            # Find part-specific transform file
+                            part_transform_file = None
+                            
+                            # Try to find by part number in filename
+                            part_match = re.search(r'part(\d+)', part_name, re.IGNORECASE)
                             if part_match:
                                 part_num = part_match.group(1)
-                                pattern = f"*_part{part_num:0>2}_transform.txt"
+                                pattern = f"*{generation_str}_part{part_num:0>2}_transform.txt"
                                 for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
                                     part_transform_file = file
                                     break
-                        
-                        if part_transform_file is None:
-                            logger.warning(f"No transform file found for part {part_name} (index {idx}), skipping")
-                            continue
-                        
-                        # Load part-specific transformation
-                        T_part = np.loadtxt(part_transform_file) # (4, 4)
+                            
+                            # If not found, try by index
+                            if part_transform_file is None:
+                                pattern = f"*{generation_str}_part{idx:02d}_transform.txt"
+                                for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
+                                    part_transform_file = file
+                                    break
+                            
+                            # If still not found, try without generation suffix
+                            if part_transform_file is None:
+                                if part_match:
+                                    part_num = part_match.group(1)
+                                    pattern = f"*_part{part_num:0>2}_transform.txt"
+                                    for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
+                                        part_transform_file = file
+                                        break
+                            
+                            if part_transform_file is None:
+                                logger.warning(f"No transform file found for part {part_name} (index {idx}), skipping")
+                                continue
+                            
+                            # Load part-specific transformation
+                            T_part = np.loadtxt(part_transform_file) # (4, 4)
 
-                        if idx == 0:
-                            T_part_reference = T_part
-                        
-                        # transform relative the first frame
-                        T_part = np.linalg.inv(T_part_reference) @ T_part # (4, 4)
+                            if idx == 0:
+                                T_part_reference = T_part
+                            
+                            # transform relative the first frame
+                            T_part = np.linalg.inv(T_part_reference) @ T_part # (4, 4)
 
-                        pcd_registered = copy.deepcopy(pcd_original)
+                            pcd_registered = copy.deepcopy(pcd_original)
 
-                        pcd_registered = pcd_registered.transform(T_part)
+                            pcd_registered = pcd_registered.transform(T_part)
 
-                        registered_pcds.append(pcd_registered)
+                            registered_pcds.append(pcd_registered)
+                            
+                            # Save registered point cloud to file
+                            registered_output_dir = os.path.join(results_vis_dir, "registered")
+                            os.makedirs(registered_output_dir, exist_ok=True)
+                            
+                            # Create output filename based on part name and generation
+                            part_basename = os.path.splitext(part_name)[0]
+                            registered_filename = f"{part_basename}_{generation_str}_registered.ply"
+                            registered_filepath = os.path.join(registered_output_dir, registered_filename)
+                            
+                            # Save point cloud
+                            o3d.io.write_point_cloud(registered_filepath, pcd_registered, write_ascii=False)
+                            logger.info(f"Saved registered point cloud: {registered_filename}")
                         
-                        # Save registered point cloud to file
-                        registered_output_dir = os.path.join(results_vis_dir, "registered")
-                        os.makedirs(registered_output_dir, exist_ok=True)
-                        
-                        # Create output filename based on part name and generation
-                        part_basename = os.path.splitext(part_name)[0]
-                        registered_filename = f"{part_basename}_{generation_str}_registered.ply"
-                        registered_filepath = os.path.join(registered_output_dir, registered_filename)
-                        
-                        # Save point cloud
-                        o3d.io.write_point_cloud(registered_filepath, pcd_registered, write_ascii=False)
-                        logger.info(f"Saved registered point cloud: {registered_filename}")
-                    
-                    logger.info(f"Applied transformations to {len(registered_pcds)} point clouds")
-                    logger.info(f"Saved {len(registered_pcds)} registered point clouds to {os.path.join(results_vis_dir, 'registered')}")
+                        logger.info(f"Applied transformations to {len(registered_pcds)} point clouds")
+                        logger.info(f"Saved {len(registered_pcds)} registered point clouds to {os.path.join(results_vis_dir, 'registered')}")
                     
                     # Visualize if requested
                     if args.visualize:

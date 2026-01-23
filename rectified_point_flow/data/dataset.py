@@ -778,6 +778,7 @@ class PointCloudDataset(Dataset):
 
         # Calculate scale based on the extent of the globally rotated primary part
         scale = np.max(np.abs(primary_part_rotated)) * 1.5 # better to scale a factor of 2.0 because now we are only use one anchored part
+        
         if self.split.startswith("train") and self.random_scale_range is not None:
             scale *= np.random.uniform(*self.random_scale_range)
 

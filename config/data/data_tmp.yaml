@@ -1,5 +1,5 @@
 _target_: rectified_point_flow.data.PointCloudDataModule
-multi_anchor: true
+multi_anchor: false
 random_scale_range: [0.9, 1.1]
 
 use_random_split: false # otherwise, we use the sequence-based split

@@ -1,0 +1,18 @@
+defaults:
+  - flow_model: point_cloud_dit_12
+  - optimizer: muon
+  - lr_scheduler: muon
+
+_target_: rectified_point_flow.modeling.RectifiedPointFlow
+
+# optimizer is now provided by config group: model/optimizer=muon|adamw
+
+# lr_scheduler provided by config group: model/lr_scheduler=muon|adamw
+
+timestep_sampling: "u_shaped"
+inference_sampler: "euler"
+inference_sampling_steps: 50
+n_generations: 1
+
+encoder_on: false
+encoder_freeze: true

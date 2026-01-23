@@ -411,8 +411,34 @@ class SampleProcessor:
             
             outlier_removal_elapsed_time = time.time() - outlier_removal_start_time
             logger.info(f"Outlier removal completed in {outlier_removal_elapsed_time:.3f}s for {len(original_parts)} parts")
+
+        # Optional pre-FPS random downsampling for very large parts (keeps originals intact)
+        if self.max_points_per_part is not None:
+            pre_fps_parts = []
+            pre_fps_normals = []
+            for i, (part, norms) in enumerate(zip(fps_parts, fps_normals)):
+                pre_fps_cap = 20 * self.max_points_per_part
+                if len(part) > pre_fps_cap:
+                    indices = np.random.choice(len(part), pre_fps_cap, replace=False)
+                    pre_fps_parts.append(part[indices].copy())
+                    if norms is not None:
+                        pre_fps_normals.append(norms[indices].copy())
+                    else:
+                        pre_fps_normals.append(None)
+                    logger.debug(
+                        f"Part {i}: pre-FPS random downsample from {len(part)} to {pre_fps_cap} points"
+                    )
+                else:
+                    pre_fps_parts.append(part)
+                    pre_fps_normals.append(norms)
+
+            fps_parts = pre_fps_parts
+            fps_normals = pre_fps_normals
         
         # Step 3: Apply proportional batched FPS with minimum points per part constraint
+        # Log voxel size for FPS allocation
+        logger.info(f"Using voxel size {self.voxel_size} meters for FPS allocation (method: {self.allocation_method})")
+        
         # Calculate adaptive sample count for voxel_adaptive method
         if self.allocation_method == 'voxel_adaptive':
             # Calculate adaptive sample count based on occupied voxels after outlier removal
@@ -531,7 +557,7 @@ class SampleProcessor:
         )
         fps_end_time = time.perf_counter()
         fps_duration = fps_end_time - fps_start_time
-        logger.debug(f"FPS computation time: {fps_duration:.4f} seconds for {len(batch_parts_tensor)} parts")
+        logger.info(f"FPS computation time: {fps_duration:.4f} seconds for {len(batch_parts_tensor)} parts")
         
         # Extract sampled points using indices (keep as tensors to avoid redundant conversions)
         sampled_points_list = []
@@ -555,6 +581,7 @@ class SampleProcessor:
         
         # Process each part individually
         part_results = []
+        total_feature_extraction_time = 0.0
         
         for i, (sampled_pts, sampled_norms) in enumerate(zip(sampled_points_list, sampled_normals_list)):
             # Check if part is empty (now checking tensor)
@@ -573,6 +600,7 @@ class SampleProcessor:
             )
             feature_extraction_end_time = time.perf_counter()
             feature_extraction_duration = feature_extraction_end_time - feature_extraction_start_time
+            total_feature_extraction_time += feature_extraction_duration
             logger.debug(f"Feature extraction time for part {i}: {feature_extraction_duration:.4f} seconds ({sampled_pts.shape[0]} keypoints)")
 
             features = feature_result['features']
@@ -585,6 +613,8 @@ class SampleProcessor:
                 'features': features.cpu().numpy() if isinstance(features, torch.Tensor) else features,  # Convert tensor to numpy for storage
             }
             part_results.append(part_result)
+        
+        logger.info(f"Feature extraction time: {total_feature_extraction_time:.4f} seconds for {len(part_results)} parts")
         
         return part_results
     
