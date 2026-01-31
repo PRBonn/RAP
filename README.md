@@ -29,7 +29,7 @@
     <a href="https://gradientspaces.stanford.edu/"><strong>Stanford University</strong></a>
 
 
-  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://91344e10c9d36ea0b4.gradio.live/">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a></h3>
+  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://d19a49c14cb248c1ec.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a></h3>
   <div align="center"></div>
 </p>
 
@@ -46,7 +46,7 @@
    - [x] Release the inference code and RAP model v1.0.
    - [ ] Release the training code.
    - [ ] Release the training data generation code and example training data.
-   - [ ] Release RAP model v1.1.
+   - [x] Release RAP model v1.1.
 
 
 ## Abstract
