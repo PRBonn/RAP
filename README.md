@@ -6,6 +6,7 @@
     <a href="https://github.com/PRBonn/RAP"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" /></a>
     <a href="https://arxiv.org/pdf/2512.01850"><img src="https://img.shields.io/badge/Paper-pdf-<COLOR>.svg?style=flat-square" /></a>
     <a href="https://github.com/PRBonn/RAP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
+    <a href="https://9c25d31571355971d3.gradio.live"><img src="https://img.shields.io/badge/-HuggingFace-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
   </p>
   
   <p align="center">
@@ -29,7 +30,7 @@
     <a href="https://gradientspaces.stanford.edu/"><strong>Stanford University</strong></a>
 
 
-  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://d19a49c14cb248c1ec.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a></h3>
+  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://9c25d31571355971d3.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a></h3>
   <div align="center"></div>
 </p>
 
@@ -44,9 +45,10 @@
 
 ## TODO List
    - [x] Release the inference code and RAP model v1.0.
+   - [x] Release RAP model v1.1.
    - [ ] Release the training code.
    - [ ] Release the training data generation code and example training data.
-   - [x] Release RAP model v1.1.
+
 
 
 ## Abstract
