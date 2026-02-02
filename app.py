@@ -30,7 +30,7 @@ parser.add_argument('--flow_model_checkpoint', type=str, default='./weights/rap_
 parser.add_argument('--config', type=str, default='RAP_inference',
                     help='Config name for inference (default: RAP_inference)')
 parser.add_argument('--model', type=str, default=None,
-                    choices=['rap_10', 'rap_12'],
+                    choices=['rap_10', 'rap_12', 'rap_16'],
                     help='Model configuration to use (default: None, uses config default)')
 parser.add_argument('--max_points_for_vis', type=int, default=500000,
                     help='Maximum number of points for visualization (default: 500000)')
@@ -41,6 +41,13 @@ FLOW_MODEL_CHECKPOINT = args.flow_model_checkpoint
 CONFIG = args.config
 MODEL = args.model
 MAX_POINTS_FOR_VIS = args.max_points_for_vis
+
+# Model selection mapping
+MODEL_CONFIGS = {
+    "S (rap_10)": ("rap_10", "./weights/rap_model_10.ckpt"),
+    "M (rap_12)": ("rap_12", "./weights/rap_model_12.ckpt"),
+    # "L (rap_16)": ("rap_16", "./weights/rap_model_16.ckpt"),
+}
 
 
 def is_mesh_file(file_path: str) -> bool:
@@ -381,16 +388,33 @@ def combine_point_clouds(ply_files, output_path, max_points_count, use_original_
     import open3d as o3d
     import numpy as np
     
-    combined_pcd = o3d.geometry.PointCloud()
+    # First pass: Load all point clouds and calculate total point count
+    loaded_pcds = []
+    total_points = 0
     
     for idx, ply_file in enumerate(ply_files):
         pcd = o3d.io.read_point_cloud(ply_file)
         if len(pcd.points) == 0:
             continue
-
-        # random downsample pcd to max_points_count
-        if len(pcd.points) > max_points_count:
-            indices = np.random.choice(len(pcd.points), size=max_points_count, replace=False)
+        loaded_pcds.append((idx, pcd))
+        total_points += len(pcd.points)
+    
+    # Calculate downsample ratio to achieve approximately max_points_count total
+    if total_points > max_points_count:
+        downsample_ratio = max_points_count / total_points
+    else:
+        downsample_ratio = 1.0
+    
+    # Second pass: Downsample each point cloud proportionally and combine
+    combined_pcd = o3d.geometry.PointCloud()
+    
+    for idx, pcd in loaded_pcds:
+        # Calculate target number of points for this point cloud
+        target_points = max(1, int(len(pcd.points) * downsample_ratio))
+        
+        # Downsample if needed
+        if len(pcd.points) > target_points:
+            indices = np.random.choice(len(pcd.points), size=target_points, replace=False)
             pcd = pcd.select_by_index(indices)
 
         # Assign colors based on use_original_colors flag
@@ -587,19 +611,24 @@ def calculate_total_file_size(file_paths):
 def build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio, 
                        apply_coordinate_transform, adaptive_parameters,
                        rigidity_forcing, n_generations, inference_sampling_steps,
-                       save_trajectory, output_generated, use_original_colors):
+                       save_trajectory, output_generated, use_original_colors,
+                       model_name=None, model_checkpoint=None):
     """Build command-line arguments for demo.py."""
+    # Use provided model/checkpoint or fall back to defaults
+    checkpoint = model_checkpoint if model_checkpoint else FLOW_MODEL_CHECKPOINT
+    model = model_name if model_name else MODEL
+    
     cmd = [
         "python", "demo.py",
         "--input", str(tmp_input_dir),
         "--output", str(tmp_output_dir),
         "--log_level", "INFO",
-        "--flow_model_checkpoint", FLOW_MODEL_CHECKPOINT,
+        "--flow_model_checkpoint", checkpoint,
         "--config", CONFIG,
     ]
     
-    if MODEL is not None:
-        cmd += ["--model", MODEL]
+    if model is not None:
+        cmd += ["--model", model]
     
     if voxel_size is not None:
         cmd += ["--voxel_size", str(float(voxel_size))]
@@ -699,7 +728,7 @@ def _yield_outputs(zip_path, registered_vis_file, log_output):
         yield zip_path, registered_vis_file
 
 
-def run_rap_demo(ply_files, voxel_size, voxel_ratio, apply_coordinate_transform,
+def run_rap_demo(ply_files, model_selection, voxel_size, voxel_ratio, apply_coordinate_transform,
                  adaptive_parameters, rigidity_forcing=True, n_generations=1, 
                  inference_sampling_steps=10, save_trajectory=False, output_generated=False,
                  use_original_colors=True):
@@ -871,15 +900,51 @@ def run_rap_demo(ply_files, voxel_size, voxel_ratio, apply_coordinate_transform,
             log_output += "Coordinates are within normal range, no shift needed.\n"
         yield from _yield_outputs(None, None, log_output)
     
+    # Combine original input point clouds
+    if LOG_WINDOW_ENABLED:
+        log_output += "\nCombining original input point clouds...\n"
+    yield from _yield_outputs(None, None, log_output)
+    
+    input_ply_files = sorted(list(Path(tmp_input_dir).glob("*.ply")))
+    if len(input_ply_files) > 0:
+        combined_input_ply_path = tmp_output_dir / "downsampled_combined_input.ply"
+        success, combined_input_pcd = combine_point_clouds(
+            [str(f) for f in input_ply_files], 
+            str(combined_input_ply_path), 
+            max_points_count, 
+            use_original_colors
+        )
+        if success:
+            if LOG_WINDOW_ENABLED:
+                log_output += f"Successfully combined {len(input_ply_files)} input point cloud(s) into merged_input_pointclouds.ply\n"
+        else:
+            if LOG_WINDOW_ENABLED:
+                log_output += "Warning: Failed to combine input point clouds\n"
+        yield from _yield_outputs(None, None, log_output)
+    else:
+        if LOG_WINDOW_ENABLED:
+            log_output += "Warning: No PLY files found in input directory\n"
+        yield from _yield_outputs(None, None, log_output)
+    
     if LOG_WINDOW_ENABLED:
         log_output += f"\nStarting RAP registration process...\n"
     yield from _yield_outputs(None, None, log_output)
+    
+    # Extract model configuration from selection
+    model_name = None
+    model_checkpoint = None
+    if model_selection and model_selection in MODEL_CONFIGS:
+        model_name, model_checkpoint = MODEL_CONFIGS[model_selection]
+        if LOG_WINDOW_ENABLED:
+            log_output += f"Using model: {model_selection} ({model_name}, {model_checkpoint})\n"
+        yield from _yield_outputs(None, None, log_output)
     
     # Build and run command
     cmd = build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio,
                             apply_coordinate_transform, adaptive_parameters,
                             rigidity_forcing, n_generations, inference_sampling_steps,
-                            save_trajectory, output_generated, use_original_colors)
+                            save_trajectory, output_generated, use_original_colors,
+                            model_name=model_name, model_checkpoint=model_checkpoint)
     
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -958,6 +1023,11 @@ def run_rap_demo(ply_files, voxel_size, voxel_ratio, apply_coordinate_transform,
         yield from _yield_outputs(None, None, log_output)
 
 
+# Dataset emoji mapping
+DATASET_EMOJIS = {
+    # Add your dataset names and their corresponding emojis here
+}
+
 # Prepare example datasets
 example_data_dir = Path("demo_example_data").resolve()
 examples, example_names = [], []
@@ -1000,9 +1070,21 @@ with gr.Blocks() as demo:
                     if idx + j < len(examples):
                         example_file_list = examples[idx + j]
                         folder_name = example_names[idx + j]
-                        gr.Button(f"📂 {folder_name} ({len(example_file_list)} files)",
+                        # Add emoji if dataset name is in the dictionary
+                        emoji = DATASET_EMOJIS.get(folder_name, "")
+                        button_text = f"📂 {folder_name} ({len(example_file_list)} files)"
+                        if emoji:
+                            button_text += f" {emoji}"
+                        gr.Button(button_text,
                                 variant="secondary", size="sm", scale=1).click(
                             fn=lambda files=example_file_list: files, outputs=ply_files)
+    
+    with gr.Row():
+        model_selection = gr.Radio(
+            choices=list(MODEL_CONFIGS.keys()),
+            value="M (rap_12)",  # Default to M (rap_12)
+            label="Model Zoo",
+        )
     
     with gr.Row():
         n_generations = gr.Slider(minimum=1, maximum=10, value=1, step=1,
@@ -1013,7 +1095,7 @@ with gr.Blocks() as demo:
         # print(f"n_generations: {n_generations}, inference_sampling_steps: {inference_sampling_steps}")
     
     with gr.Row():
-        voxel_size = gr.Slider(minimum=0.001, maximum=0.4, value=0.25, step=0.001,
+        voxel_size = gr.Slider(minimum=0.001, maximum=0.5, value=0.25, step=0.001,
                               label="Voxel size (meters) [overwritten by adaptive parameters]")
         voxel_ratio = gr.Slider(minimum=0.01, maximum=2.0, value=0.2, step=0.01,
                                label="Voxel ratio for sampling")
@@ -1052,7 +1134,7 @@ with gr.Blocks() as demo:
     
     run_button.click(
         fn=run_rap_demo,
-        inputs=[ply_files, voxel_size, voxel_ratio, apply_coordinate_transform,
+        inputs=[ply_files, model_selection, voxel_size, voxel_ratio, apply_coordinate_transform,
                adaptive_parameters, rigidity_forcing, n_generations, inference_sampling_steps,
                save_trajectory, output_generated, use_original_colors],
         outputs=outputs_list)

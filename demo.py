@@ -583,7 +583,6 @@ def main():
     parser.add_argument('--config', type=str, default='RAP_inference',
                         help='Config name for inference (default: RAP_inference)')
     parser.add_argument('--model', type=str, default=None,
-                        choices=['rap_10', 'rap_12', 'rap_12_po'],
                         help='Model configuration to use (default: None, uses config default)')
     parser.add_argument('--rigidity_forcing', action='store_true', default=True,
                         help='Enable rigidity forcing in flow model (default: True)')
@@ -883,8 +882,8 @@ def main():
         adjustment_reason = None
         adaptive_voxel_ratio = args.voxel_ratio
         
-        # Adjust voxel_ratio if median point count is larger than 15000
-        target_median_point_count_max = 15000.0
+        # # Adjust voxel_ratio if median point count is larger than 20000
+        target_median_point_count_max = args.max_points_per_part
         if current_median_point_count > target_median_point_count_max:
             # Calculate adaptive voxel_ratio to achieve target median point count
             # voxel_ratio = target_point_count / voxel_coverage
@@ -896,8 +895,8 @@ def main():
             # Recalculate median point count with adjusted voxel_ratio
             current_median_point_count = median_voxel_coverage * adaptive_voxel_ratio
         
-        # Adjust voxel_ratio only if median point count is smaller than 1000
-        target_median_point_count_min = 1000.0
+        # Adjust voxel_ratio only if median point count is smaller than 500
+        target_median_point_count_min = 500
         if current_median_point_count < target_median_point_count_min:
             # Calculate adaptive voxel_ratio to achieve target median point count
             # voxel_ratio = target_point_count / voxel_coverage
