@@ -30,10 +30,10 @@ parser.add_argument('--flow_model_checkpoint', type=str, default='./weights/rap_
 parser.add_argument('--config', type=str, default='RAP_inference',
                     help='Config name for inference (default: RAP_inference)')
 parser.add_argument('--model', type=str, default=None,
-                    choices=['rap_10', 'rap_12', 'rap_16'],
+                    choices=['rap_8', 'rap_10', 'rap_12', 'rap_16'],
                     help='Model configuration to use (default: None, uses config default)')
-parser.add_argument('--max_points_for_vis', type=int, default=500000,
-                    help='Maximum number of points for visualization (default: 500000)')
+parser.add_argument('--max_points_for_vis', type=int, default=1000000,
+                    help='Maximum number of points for visualization (default: 1000000)')
 args = parser.parse_args()
 LOG_WINDOW_ENABLED = args.log_on
 SERVER_PORT = args.server_port
@@ -44,9 +44,11 @@ MAX_POINTS_FOR_VIS = args.max_points_for_vis
 
 # Model selection mapping
 MODEL_CONFIGS = {
-    "S (rap_10)": ("rap_10", "./weights/rap_model_10.ckpt"),
-    "M (rap_12)": ("rap_12", "./weights/rap_model_12.ckpt"),
-    # "L (rap_16)": ("rap_16", "./weights/rap_model_16.ckpt"),
+    # "S (rap_8)": ("rap_8", "./weights/rap_model_8.ckpt"),
+    "M (rap_10)": ("rap_10", "./weights/rap_model_10.ckpt"),
+    "L (rap_12)": ("rap_12", "./weights/rap_model_12.ckpt"),
+    # "Ls (rap_12)": ("rap_12", "./weights/rap_model_12_s.ckpt"),
+    # "H (rap_16)": ("rap_16", "./weights/rap_model_16.ckpt"),
 }
 
 
@@ -66,115 +68,29 @@ def is_mesh_file(file_path: str) -> bool:
         return False
 
 
-def is_ply_mesh(ply_path: str) -> bool:
-    """Check if a PLY file contains mesh data (faces/triangles)."""
-    return is_mesh_file(ply_path)
-
-
 def convert_mesh_to_pointcloud(mesh_path: str, output_path: str, num_points: int = 100000) -> bool:
     """Convert a mesh file (PLY, OBJ, etc.) to point cloud PLY by sampling points from the surface."""
     try:
-        import trimesh
         import open3d as o3d
-        import numpy as np
         
-        # Load mesh
-        loaded = trimesh.load(str(mesh_path), process=False)
+        # Load mesh with Open3D
+        mesh = o3d.io.read_triangle_mesh(str(mesh_path))
         
-        # Handle Scene objects (multiple meshes)
-        if isinstance(loaded, trimesh.Scene):
-            # Combine all meshes in the scene
-            meshes = []
-            for name, geometry in loaded.geometry.items():
-                if isinstance(geometry, trimesh.Trimesh):
-                    meshes.append(geometry)
-            if not meshes:
-                print(f"Error: Scene contains no valid meshes")
-                return False
-            # Merge all meshes
-            mesh = trimesh.util.concatenate(meshes)
-        elif isinstance(loaded, trimesh.Trimesh):
-            mesh = loaded
-        else:
-            print(f"Error: Unsupported mesh type: {type(loaded)}")
-            return False
-        
-        # Validate mesh
-        if mesh.vertices is None or len(mesh.vertices) == 0:
+        if len(mesh.vertices) == 0:
             print(f"Error: Mesh has no vertices")
             return False
         
-        if mesh.faces is None or len(mesh.faces) == 0:
-            # No faces, use vertices as point cloud
-            print(f"Warning: Mesh has no faces, using vertices as point cloud")
-            points = np.array(mesh.vertices)
-            face_indices = None
-        else:
-            # Validate faces
-            if len(mesh.faces) == 0:
-                points = np.array(mesh.vertices)
-                face_indices = None
-            else:
-                # Sample points from mesh surface
-                # Use uniform sampling which works well for most meshes
-                face_indices = None
-                try:
-                    points, face_indices = trimesh.sample.sample_surface(mesh, count=num_points)
-                except Exception as e1:
-                    # Fallback to even sampling if uniform fails
-                    try:
-                        points, face_indices = trimesh.sample.sample_surface_even(mesh, count=num_points)
-                    except Exception as e2:
-                        # If sampling fails, use vertices
-                        print(f"Warning: Surface sampling failed ({str(e1)}, {str(e2)}), using vertices")
-                        points = np.array(mesh.vertices)
-                        face_indices = None
+        # Sample points uniformly from mesh surface
+        pcd = mesh.sample_points_uniformly(number_of_points=num_points)
         
-        if len(points) == 0:
-            print(f"Error: No points generated from mesh")
-            return False
-        
-        # Compute normals from mesh if available
-        normals = None
-        if face_indices is not None:
-            # We have sampled points with face indices
-            try:
-                # Get face normals
-                face_normals = mesh.face_normals
-                if len(face_normals) > 0 and len(face_indices) == len(points):
-                    normals = face_normals[face_indices]
-            except Exception:
-                pass
-        
-        # If normals not available, try to use vertex normals
-        if normals is None:
-            try:
-                # Try to get vertex normals from mesh
-                if hasattr(mesh, 'vertex_normals') and mesh.vertex_normals is not None:
-                    vertex_normals = mesh.vertex_normals
-                    if len(vertex_normals) == len(mesh.vertices) and len(points) == len(mesh.vertices):
-                        # Points are vertices, use vertex normals directly
-                        normals = vertex_normals
-                    elif face_indices is not None:
-                        # Interpolate vertex normals based on face indices
-                        # This is a simplified approach - in practice, you'd want barycentric interpolation
-                        pass
-            except Exception:
-                pass
-        
-        # Create Open3D point cloud
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        
-        if normals is not None:
-            pcd.normals = o3d.utility.Vector3dVector(normals)
+        # Ensure normals are computed
+        if not pcd.has_normals():
+            pcd.estimate_normals()
         
         o3d.io.write_point_cloud(str(output_path), pcd, write_ascii=False)
         return True
     except Exception as e:
-        import traceback
         print(f"Error converting mesh to point cloud: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
         return False
 
 
@@ -302,14 +218,13 @@ def convert_e57_to_ply(input_path: str, output_path: str) -> bool:
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(combined_points)
         
-        # Add colors if available for all scans
         if has_colors and all_colors and len(all_colors) == len(all_points):
             try:
                 combined_colors = np.vstack(all_colors)
                 if len(combined_colors) == len(combined_points):
                     pcd.colors = o3d.utility.Vector3dVector(combined_colors)
-            except Exception as e:
-                print(f"Warning: Failed to combine colors: {e}")
+            except Exception:
+                pass
         
         if len(pcd.points) == 0:
             return False
@@ -317,17 +232,89 @@ def convert_e57_to_ply(input_path: str, output_path: str) -> bool:
         o3d.io.write_point_cloud(str(output_path), pcd, write_ascii=False)
         return True
     except ImportError:
-        print("Error: pye57 is required for E57 files. Install with: pip install pye57")
+        print("Error: pye57 required for E57. pip install pye57")
         return False
     except Exception as e:
-        print(f"Error converting E57 file to PLY: {e}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+        print(f"Error converting E57: {e}")
+        return False
+
+
+def convert_ptx_to_ply(input_path: str, output_path: str) -> bool:
+    """Convert PTX point cloud files to PLY format."""
+    try:
+        import open3d as o3d
+        import numpy as np
+        
+        points = []
+        colors = []
+        
+        with open(input_path, 'r') as f:
+            lines = f.readlines()
+            i = 0
+            
+            # Skip header (typically 10-12 lines: columns, rows, transformation matrices)
+            while i < len(lines) and i < 20:
+                line = lines[i].strip()
+                if not line or line.startswith('#'):
+                    i += 1
+                    continue
+                # Check if this looks like point data (numeric values)
+                parts = line.split()
+                if len(parts) >= 3:
+                    try:
+                        float(parts[0])
+                        float(parts[1])
+                        float(parts[2])
+                        break  # Found start of point data
+                    except ValueError:
+                        i += 1
+                        continue
+                i += 1
+            
+            # Parse point data (X Y Z Intensity R G B)
+            for line in lines[i:]:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
+                    points.append([x, y, z])
+                    
+                    # Extract RGB if available (columns 4, 5, 6)
+                    if len(parts) >= 7:
+                        try:
+                            r, g, b = float(parts[4]), float(parts[5]), float(parts[6])
+                            if r > 1.0 or g > 1.0 or b > 1.0:
+                                r, g, b = r / 255.0, g / 255.0, b / 255.0
+                            colors.append([r, g, b])
+                        except (ValueError, IndexError):
+                            pass
+                except (ValueError, IndexError):
+                    continue
+        
+        if len(points) == 0:
+            return False
+        
+        points = np.array(points, dtype=np.float64)
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        
+        if len(colors) == len(points):
+            colors = np.array(colors, dtype=np.float64)
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+        
+        o3d.io.write_point_cloud(str(output_path), pcd, write_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Error converting PTX file to PLY: {e}")
         return False
 
 
 def convert_to_ply(input_path: str, output_path: str) -> bool:
-    """Convert PCD, LAS, PTS, or E57 point cloud files to PLY format."""
+    """Convert PCD, LAS, PTS, E57, or PTX point cloud files to PLY format."""
     try:
         import open3d as o3d
         import numpy as np
@@ -364,6 +351,9 @@ def convert_to_ply(input_path: str, output_path: str) -> bool:
         
         elif file_ext == '.e57':
             return convert_e57_to_ply(input_path, output_path)
+        
+        elif file_ext == '.ptx':
+            return convert_ptx_to_ply(input_path, output_path)
         
         return False
     except Exception as e:
@@ -538,11 +528,8 @@ def apply_global_shift_to_ply(ply_path, global_shift):
     pcd_shifted = o3d.geometry.PointCloud()
     pcd_shifted.points = o3d.utility.Vector3dVector(points_shifted)
     
-    # Preserve colors if they exist
     if pcd.has_colors():
         pcd_shifted.colors = pcd.colors
-    
-    # Preserve normals if they exist
     if pcd.has_normals():
         pcd_shifted.normals = pcd.normals
     
@@ -551,73 +538,52 @@ def apply_global_shift_to_ply(ply_path, global_shift):
 
 
 def apply_global_shift_to_directory(ply_dir, global_shift):
-    """Apply global shift to all PLY files in a directory."""
-    ply_files = list(Path(ply_dir).glob("*.ply"))
-    success_count = 0
-    for ply_file in ply_files:
-        if apply_global_shift_to_ply(ply_file, global_shift):
-            success_count += 1
-    return success_count
+    for ply_file in Path(ply_dir).glob("*.ply"):
+        apply_global_shift_to_ply(ply_file, global_shift)
 
 
 def save_global_shift(global_shift, output_dir):
-    """Save global shift to a text file."""
-    shift_file = Path(output_dir) / "global_shift.txt"
     try:
-        with open(shift_file, 'w') as f:
-            f.write("# Global shift applied to input point clouds\n")
-            f.write("# Format: shift_x shift_y shift_z\n")
-            f.write("# To recover original coordinates, add this shift back\n")
-            f.write(f"{global_shift[0]:.6f} {global_shift[1]:.6f} {global_shift[2]:.6f}\n")
+        (Path(output_dir) / "global_shift.txt").write_text(
+            f"{global_shift[0]:.6f} {global_shift[1]:.6f} {global_shift[2]:.6f}\n"
+        )
         return True
-    except Exception as e:
-        print(f"Error saving global shift: {e}")
+    except OSError:
         return False
 
 
 def normalize_file_paths(ply_files):
-    """Normalize file paths from Gradio input."""
     if isinstance(ply_files, str):
         return [ply_files]
-    elif not isinstance(ply_files, list):
-        return list(ply_files) if ply_files else []
+    if not isinstance(ply_files, (list, tuple)):
+        ply_files = list(ply_files) if ply_files else []
     return [str(f) for f in ply_files if f]
 
 
 def get_file_path(src):
-    """Get file path, handling Gradio file objects."""
     src = Path(src)
-    if not src.exists():
-        name = getattr(src, "name", None)
-        if name:
-            src = Path(name)
     return src if src.exists() else None
 
 
 def calculate_total_file_size(file_paths):
-    """Calculate total size of all files in bytes."""
-    total_size = 0
-    for file_path in file_paths:
-        src = get_file_path(file_path)
-        if src and src.exists():
+    total = 0
+    for f in file_paths:
+        src = get_file_path(f)
+        if src:
             try:
-                total_size += src.stat().st_size
-            except (OSError, ValueError):
-                # Skip files that can't be accessed
+                total += src.stat().st_size
+            except OSError:
                 pass
-    return total_size
+    return total
 
 
-def build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio, 
+def build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio,
                        apply_coordinate_transform, adaptive_parameters,
                        rigidity_forcing, n_generations, inference_sampling_steps,
                        save_trajectory, output_generated, use_original_colors,
                        model_name=None, model_checkpoint=None):
-    """Build command-line arguments for demo.py."""
-    # Use provided model/checkpoint or fall back to defaults
-    checkpoint = model_checkpoint if model_checkpoint else FLOW_MODEL_CHECKPOINT
-    model = model_name if model_name else MODEL
-    
+    checkpoint = model_checkpoint or FLOW_MODEL_CHECKPOINT
+    model = model_name or MODEL
     cmd = [
         "python", "demo.py",
         "--input", str(tmp_input_dir),
@@ -683,45 +649,26 @@ def build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio,
 
 
 def process_registered_files(log_dir, tmp_output_dir, max_points_count, use_original_colors=False):
-    """Process registered PLY files and prepare for visualization.
-    
-    Returns:
-        tuple: (point_cloud: o3d.geometry.PointCloud or None, file_path: str or None)
-    """
     registered_pattern = str(log_dir / "**" / "registered" / "*_registered.ply")
     registered_files = sorted(glob.glob(registered_pattern, recursive=True))
-    
     if not registered_files:
         return None, None
-    
+
+    import open3d as o3d
+    first_file = str(Path(registered_files[0]).resolve())
+    if len(registered_files) > 1:
+        combined_ply_path = tmp_output_dir / "downsampled_combined_registered.ply"
+        success, combined_pcd = combine_point_clouds(registered_files, combined_ply_path, max_points_count, use_original_colors)
+        if success:
+            return combined_pcd, str(combined_ply_path.resolve())
     try:
-        import open3d as o3d
-        
-        if len(registered_files) > 1:
-            # Combine multiple files
-            combined_ply_path = tmp_output_dir / "downsampled_combined_registered.ply"
-            success, combined_pcd = combine_point_clouds(registered_files, combined_ply_path, max_points_count, use_original_colors)
-            if success:
-                return combined_pcd, str(combined_ply_path.resolve())
-        
-        # Fallback: use first file as-is - load it and return both
-        first_file_path = str(Path(registered_files[0]).resolve())
-        pcd = o3d.io.read_point_cloud(first_file_path)
-        if len(pcd.points) == 0:
-            return None, None
-        return pcd, first_file_path
-    except ImportError:
-        # Fallback: return file path only if Open3D not available
-        first_file_path = str(Path(registered_files[0]).resolve())
-        return None, first_file_path
+        pcd = o3d.io.read_point_cloud(first_file)
+        return (pcd, first_file) if len(pcd.points) > 0 else (None, None)
     except Exception:
-        # Fallback: return file path only on error
-        first_file_path = str(Path(registered_files[0]).resolve())
-        return None, first_file_path
+        return None, first_file
 
 
-def _yield_outputs(zip_path, registered_vis_file, log_output):
-    """Helper function to yield outputs conditionally based on LOG_WINDOW_ENABLED."""
+def _yield_outputs(zip_path, registered_vis_file, log_output=""):
     if LOG_WINDOW_ENABLED:
         yield zip_path, registered_vis_file, log_output
     else:
@@ -778,88 +725,53 @@ def run_rap_demo(ply_files, model_selection, voxel_size, voxel_ratio, apply_coor
         dst = tmp_input_dir / (src.stem + '.ply')
         
         if file_ext == '.ply':
-            # Check if PLY file is a mesh and convert if needed
-            if is_ply_mesh(str(src)):
+            if is_mesh_file(str(src)):
                 if LOG_WINDOW_ENABLED:
-                    log_output += f"Detected mesh in {src.name}, converting to point cloud...\n"
+                    log_output += f"Converting mesh {src.name} to point cloud...\n"
                 yield from _yield_outputs(None, None, log_output)
-                if convert_mesh_to_pointcloud(str(src), str(dst)):
-                    if LOG_WINDOW_ENABLED:
-                        log_output += f"Successfully converted mesh {src.name} to point cloud\n"
-                else:
-                    # Fallback: try to copy as point cloud
-                    if LOG_WINDOW_ENABLED:
-                        log_output += f"Warning: Mesh conversion failed, attempting to load as point cloud...\n"
+                if not convert_mesh_to_pointcloud(str(src), str(dst)):
                     try:
                         import open3d as o3d
                         pcd = o3d.io.read_point_cloud(str(src))
                         if len(pcd.points) > 0:
                             o3d.io.write_point_cloud(str(dst), pcd, write_ascii=False)
-                            if LOG_WINDOW_ENABLED:
-                                log_output += f"Loaded {src.name} as point cloud (using vertices only)\n"
                         else:
-                            error_msg = f"Error: Could not convert mesh {src.name} to point cloud\n"
+                            error_msg = f"Error: Could not convert mesh {src.name}\n"
                             if LOG_WINDOW_ENABLED:
                                 log_output += error_msg
                             yield from _yield_outputs(None, None, log_output)
                             return
                     except Exception as e:
-                        error_msg = f"Error: Failed to process {src.name}: {str(e)}\n"
+                        error_msg = f"Error: Failed to process {src.name}: {e}\n"
                         if LOG_WINDOW_ENABLED:
                             log_output += error_msg
                         yield from _yield_outputs(None, None, log_output)
                         return
             else:
-                # Regular point cloud PLY file, just copy
                 shutil.copy(src, dst)
-                if LOG_WINDOW_ENABLED:
-                    log_output += f"Copied {src.name} to input directory\n"
         elif file_ext == '.obj':
-            # OBJ files are typically meshes, convert to point cloud
             if LOG_WINDOW_ENABLED:
-                log_output += f"Converting OBJ mesh {src.name} to point cloud...\n"
+                log_output += f"Converting OBJ {src.name}...\n"
             yield from _yield_outputs(None, None, log_output)
-            
-            # Try to convert with detailed error reporting
-            try:
-                if convert_mesh_to_pointcloud(str(src), str(dst)):
-                    if LOG_WINDOW_ENABLED:
-                        log_output += f"Successfully converted OBJ mesh {src.name} to point cloud\n"
-                else:
-                    # Check if file exists and is readable
-                    import os
-                    if not os.path.exists(str(src)):
-                        error_msg = f"Error: OBJ file {src.name} not found\n"
-                    elif not os.access(str(src), os.R_OK):
-                        error_msg = f"Error: Cannot read OBJ file {src.name}\n"
-                    else:
-                        error_msg = f"Error: Failed to convert OBJ mesh {src.name} to point cloud.\n"
-                        error_msg += "Possible reasons: invalid mesh geometry, empty mesh, or unsupported OBJ format.\n"
-                        error_msg += "Please check the file and try again.\n"
-                    if LOG_WINDOW_ENABLED:
-                        log_output += error_msg
-                    yield from _yield_outputs(None, None, log_output)
-                    return
-            except Exception as e:
-                error_msg = f"Error: Exception while converting OBJ mesh {src.name}: {str(e)}\n"
+            if not convert_mesh_to_pointcloud(str(src), str(dst)):
+                error_msg = f"Error: Failed to convert OBJ {src.name}\n"
                 if LOG_WINDOW_ENABLED:
                     log_output += error_msg
                 yield from _yield_outputs(None, None, log_output)
                 return
-        elif file_ext in ['.pcd', '.las', '.laz', '.pts', '.e57']:
+        elif file_ext in ['.pcd', '.las', '.laz', '.pts', '.e57', '.ptx']:
             if LOG_WINDOW_ENABLED:
-                log_output += f"Converting {src.name} to PLY format...\n"
+                log_output += f"Converting {src.name}...\n"
             yield from _yield_outputs(None, None, log_output)
             if not convert_to_ply(str(src), str(dst)):
-                error_msg = f"Error: Failed to convert {src.name}\n"
+                error_msg = f"Error: Failed to convert {src.name}"
                 if file_ext == '.e57':
-                    error_msg += "Note: E57 files require pye57 library. Install with: pip install pye57\n"
+                    error_msg += " (pip install pye57)"
+                error_msg += "\n"
                 if LOG_WINDOW_ENABLED:
                     log_output += error_msg
                 yield from _yield_outputs(None, None, log_output)
                 return
-            if LOG_WINDOW_ENABLED:
-                log_output += f"Successfully converted {src.name}\n"
         else:
             error_msg = f"Error: Unsupported file format {file_ext}\n"
             if LOG_WINDOW_ENABLED:
@@ -867,79 +779,27 @@ def run_rap_demo(ply_files, model_selection, voxel_size, voxel_ratio, apply_coor
             yield from _yield_outputs(None, None, log_output)
             return
     
-    # Check for large coordinates and apply global shift if needed
     if LOG_WINDOW_ENABLED:
-        log_output += "\nChecking for large coordinates...\n"
+        log_output += "\nChecking coordinates...\n"
     yield from _yield_outputs(None, None, log_output)
-    
-    global_shift = None
+
     if detect_large_coordinates(tmp_input_dir, threshold=100000.0):
-        if LOG_WINDOW_ENABLED:
-            log_output += "Large coordinates detected (likely UTM or global coordinates).\n"
-            log_output += "Calculating and applying global shift...\n"
-        yield from _yield_outputs(None, None, log_output)
-        
         global_shift = calculate_global_shift(tmp_input_dir)
         if global_shift is not None:
-            success_count = apply_global_shift_to_directory(tmp_input_dir, global_shift)
+            apply_global_shift_to_directory(tmp_input_dir, global_shift)
+            save_global_shift(global_shift, tmp_output_dir)
             if LOG_WINDOW_ENABLED:
-                log_output += f"Applied global shift to {success_count} point cloud(s).\n"
-                log_output += f"Global shift: [{global_shift[0]:.6f}, {global_shift[1]:.6f}, {global_shift[2]:.6f}]\n"
-            
-            # Save global shift to output directory
-            if save_global_shift(global_shift, tmp_output_dir):
-                if LOG_WINDOW_ENABLED:
-                    log_output += "Global shift saved to global_shift.txt in output directory.\n"
-            yield from _yield_outputs(None, None, log_output)
-        else:
-            if LOG_WINDOW_ENABLED:
-                log_output += "Warning: Could not calculate global shift.\n"
-            yield from _yield_outputs(None, None, log_output)
-    else:
-        if LOG_WINDOW_ENABLED:
-            log_output += "Coordinates are within normal range, no shift needed.\n"
+                log_output += f"Applied global shift [{global_shift[0]:.2f}, {global_shift[1]:.2f}, {global_shift[2]:.2f}]\n"
         yield from _yield_outputs(None, None, log_output)
     
-    # Combine original input point clouds
-    if LOG_WINDOW_ENABLED:
-        log_output += "\nCombining original input point clouds...\n"
+    input_ply_files = sorted(Path(tmp_input_dir).glob("*.ply"))
+    combined_input_ply_path = tmp_output_dir / "downsampled_combined_input.ply"
+    combine_point_clouds([str(f) for f in input_ply_files], str(combined_input_ply_path),
+                         max_points_count, use_original_colors)
     yield from _yield_outputs(None, None, log_output)
     
-    input_ply_files = sorted(list(Path(tmp_input_dir).glob("*.ply")))
-    if len(input_ply_files) > 0:
-        combined_input_ply_path = tmp_output_dir / "downsampled_combined_input.ply"
-        success, combined_input_pcd = combine_point_clouds(
-            [str(f) for f in input_ply_files], 
-            str(combined_input_ply_path), 
-            max_points_count, 
-            use_original_colors
-        )
-        if success:
-            if LOG_WINDOW_ENABLED:
-                log_output += f"Successfully combined {len(input_ply_files)} input point cloud(s) into merged_input_pointclouds.ply\n"
-        else:
-            if LOG_WINDOW_ENABLED:
-                log_output += "Warning: Failed to combine input point clouds\n"
-        yield from _yield_outputs(None, None, log_output)
-    else:
-        if LOG_WINDOW_ENABLED:
-            log_output += "Warning: No PLY files found in input directory\n"
-        yield from _yield_outputs(None, None, log_output)
+    model_name, model_checkpoint = MODEL_CONFIGS.get(model_selection, (None, None)) if model_selection else (None, None)
     
-    if LOG_WINDOW_ENABLED:
-        log_output += f"\nStarting RAP registration process...\n"
-    yield from _yield_outputs(None, None, log_output)
-    
-    # Extract model configuration from selection
-    model_name = None
-    model_checkpoint = None
-    if model_selection and model_selection in MODEL_CONFIGS:
-        model_name, model_checkpoint = MODEL_CONFIGS[model_selection]
-        if LOG_WINDOW_ENABLED:
-            log_output += f"Using model: {model_selection} ({model_name}, {model_checkpoint})\n"
-        yield from _yield_outputs(None, None, log_output)
-    
-    # Build and run command
     cmd = build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio,
                             apply_coordinate_transform, adaptive_parameters,
                             rigidity_forcing, n_generations, inference_sampling_steps,
@@ -959,74 +819,30 @@ def run_rap_demo(ply_files, model_selection, voxel_size, voxel_ratio, apply_coor
         proc.wait()
         
         if proc.returncode != 0:
-            error_msg = f"\nProcess exited with error code {proc.returncode}\n"
             if LOG_WINDOW_ENABLED:
-                log_output += error_msg
+                log_output += f"\nProcess exited with code {proc.returncode}\n"
             yield from _yield_outputs(None, None, log_output)
             return
         
-        if LOG_WINDOW_ENABLED:
-            log_output += "\nRegistration completed successfully!\n"
-            log_output += "Processing results...\n"
-        yield from _yield_outputs(None, None, log_output)
-        
-        # Process registered files
         log_dir = tmp_output_dir / "logs"
-        registered_pcd = None
-        registered_ply_file = None
+        registered_pcd, registered_ply_file = (None, None)
         if log_dir.exists():
             registered_pcd, registered_ply_file = process_registered_files(log_dir, tmp_output_dir, max_points_count, use_original_colors)
-            if LOG_WINDOW_ENABLED:
-                if registered_ply_file:
-                    log_output += f"Found registered point cloud: {Path(registered_ply_file).name}\n"
-                else:
-                    log_output += "Warning: No registered point cloud files found\n"
-        else:
-            if LOG_WINDOW_ENABLED:
-                log_output += "Warning: Log directory not found\n"
-        
         yield from _yield_outputs(None, None, log_output)
-        
-        # Create zip archive
-        if LOG_WINDOW_ENABLED:
-            log_output += "Creating output zip archive...\n"
-        yield from _yield_outputs(None, None, log_output)
+
         zip_path = shutil.make_archive(str(tmp_output_dir), "zip", tmp_output_dir)
-        if LOG_WINDOW_ENABLED:
-            log_output += f"Zip archive created: {Path(zip_path).name}\n"
-        
-        # Convert to GLB
         registered_vis_file = None
-        if registered_pcd is not None or registered_ply_file:
-            if LOG_WINDOW_ENABLED:
-                log_output += "Converting to GLB format for visualization...\n"
-            yield from _yield_outputs(None, None, log_output)
+        if registered_pcd or registered_ply_file:
             glb_path = tmp_output_dir / "registered_pointcloud.glb"
-            # Use point cloud object directly if available, otherwise fall back to file path
-            pcd_or_path = registered_pcd if registered_pcd is not None else registered_ply_file
-            if create_glb_from_point_cloud(pcd_or_path, str(glb_path), max_points_count):
+            if create_glb_from_point_cloud(registered_pcd or registered_ply_file, str(glb_path), max_points_count):
                 registered_vis_file = str(glb_path.resolve())
-                if LOG_WINDOW_ENABLED:
-                    log_output += "GLB file created successfully\n"
-            else:
-                if LOG_WINDOW_ENABLED:
-                    log_output += "Warning: Failed to create GLB file\n"
-        
-        if LOG_WINDOW_ENABLED:
-            log_output += "\n✓ All processing completed!\n"
         yield from _yield_outputs(zip_path, registered_vis_file, log_output)
     
     except Exception as e:
-        error_msg = f"\nException occurred: {str(e)}\n"
         if LOG_WINDOW_ENABLED:
-            log_output += error_msg
+            log_output += f"\nError: {e}\n"
         yield from _yield_outputs(None, None, log_output)
 
-
-# Dataset emoji mapping
-DATASET_EMOJIS = {
-    # Add your dataset names and their corresponding emojis here
-}
 
 # Prepare example datasets
 example_data_dir = Path("demo_example_data").resolve()
@@ -1048,7 +864,7 @@ with gr.Blocks() as demo:
         "## Register Any Point (RAP) 🎤 [[code](https://github.com/PRBonn/RAP)] "
         "[[paper](https://arxiv.org/pdf/2512.01850)] [[project](https://register-any-point.github.io/)]\n"
         "🎤 RAP is a single-stage multi-view point cloud registration model that generates the registered point cloud by flow matching.\n\n"
-        "☁️ Upload two or more point cloud / mesh files (`.ply`, `.pcd`, `.las`, `.laz`, `.pts`, `.e57`, or `.obj` format, at least two) for conducting the registration.\n"
+        "☁️ Upload two or more point cloud / mesh files (`.ply`, `.pcd`, `.las`, `.laz`, `.pts`, `.e57`, `.ptx`, or `.obj` format, at least two) for conducting the registration.\n"
         "📦 The results (including registered point clouds and logs) will be returned as a zip file.\n\n"
         "🚧 This demo is currently under construction and running on a local machine.\n"
         "⏳ Please be patient as it runs slower than usual due to gradio IO limitations.\n"
@@ -1057,7 +873,7 @@ with gr.Blocks() as demo:
     )
     
     with gr.Row():
-        ply_files = gr.File(label="Point cloud files", file_types=[".ply", ".pcd", ".las", ".laz", ".pts", ".e57", ".obj"],
+        ply_files = gr.File(label="Point cloud files", file_types=[".ply", ".pcd", ".las", ".laz", ".pts", ".e57", ".ptx", ".obj"],
                            file_count="multiple", type="filepath")
     
     # Example buttons
@@ -1070,11 +886,7 @@ with gr.Blocks() as demo:
                     if idx + j < len(examples):
                         example_file_list = examples[idx + j]
                         folder_name = example_names[idx + j]
-                        # Add emoji if dataset name is in the dictionary
-                        emoji = DATASET_EMOJIS.get(folder_name, "")
                         button_text = f"📂 {folder_name} ({len(example_file_list)} files)"
-                        if emoji:
-                            button_text += f" {emoji}"
                         gr.Button(button_text,
                                 variant="secondary", size="sm", scale=1).click(
                             fn=lambda files=example_file_list: files, outputs=ply_files)
@@ -1082,7 +894,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         model_selection = gr.Radio(
             choices=list(MODEL_CONFIGS.keys()),
-            value="M (rap_12)",  # Default to M (rap_12)
+            value="L (rap_12)",  # Default to L (rap_12)
             label="Model Zoo",
         )
     
@@ -1141,13 +953,5 @@ with gr.Blocks() as demo:
 
 
 if __name__ == "__main__":
-    import os
-    share_mode = os.getenv("SHARE_URL", "temporary").lower()
-    
-    if share_mode == "permanent":
-        print(f"Launching with permanent URL mode (no share=True) on port {SERVER_PORT}")
-        demo.launch(server_name="0.0.0.0", server_port=SERVER_PORT)
-    else:
-        print(f"Launching with temporary share URL (will change on restart) on port {SERVER_PORT}")
-        print("For a permanent URL, deploy to Hugging Face Spaces or use a custom domain")
-        demo.launch(share=True, server_name="0.0.0.0", server_port=SERVER_PORT)
+    share = os.getenv("SHARE_URL", "temporary").lower() != "permanent"
+    demo.launch(share=share, server_name="0.0.0.0", server_port=SERVER_PORT)

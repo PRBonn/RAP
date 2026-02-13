@@ -388,7 +388,7 @@ class RectifiedPointFlow(L.LightningModule):
             # fit transformation is done here
             rotations_pred, translations_pred = fit_transformations(
                 output_dict["cond"], pointclouds_pred, points_per_part, output_dict["cu_seqlens_batch"]
-            )
+            ) # from cond to prediction
             # here it's still in the scaled space
 
             eval_results = self.evaluator.run(

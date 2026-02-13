@@ -646,6 +646,8 @@ class PointCloudDataset(Dataset):
         parts = sorted(list(group.keys()))
         point_clouds = list(self.pool.map(lambda p: _load_point_cloud_from_h5(group, p), parts))
         pcs, pns, features, thr, is_pre_sampled = self._sample_points(point_clouds)
+        # Part filenames: use group key (no extension) for each part
+        part_filenames = [str(p) for p in parts]
         return {
             "index": index,
             "name": name,
@@ -655,6 +657,7 @@ class PointCloudDataset(Dataset):
             "features": features if self.load_features else None,
             "overlap_threshold": thr,
             "is_pre_sampled": is_pre_sampled,
+            "part_filenames": part_filenames,
         }
 
     def _load_from_folder(self, frag: str, index: int) -> dict:
@@ -662,6 +665,8 @@ class PointCloudDataset(Dataset):
         ply_files = sorted(glob.glob(os.path.join(folder, "*.ply")))
         point_clouds = [_load_point_cloud_from_ply(p) for p in ply_files]
         pcs, pns, features, overlap_thr, is_pre_sampled = self._sample_points(point_clouds)
+        # Part filenames: basename without extension for each PLY file
+        part_filenames = [os.path.splitext(os.path.basename(p))[0] for p in ply_files]
         return {
             "index": index,
             "name": frag,
@@ -671,6 +676,7 @@ class PointCloudDataset(Dataset):
             "overlap_threshold": overlap_thr,
             "num_parts": len(point_clouds),
             "is_pre_sampled": is_pre_sampled,
+            "part_filenames": part_filenames,
         }
 
     def _sample_points(self, meshes: list[trimesh.Trimesh]) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray] | None, float, bool]:
@@ -870,6 +876,10 @@ class PointCloudDataset(Dataset):
         for key in ["index", "name", "overlap_threshold"]:
             results[key] = data[key]
 
+        # Part filenames: pad to max_parts (empty string for padded slots)
+        part_filenames = data.get("part_filenames", [f"part{i:02d}" for i in range(n_parts)])
+        part_filenames_padded = list(part_filenames[:n_parts]) + [""] * (self.max_parts - n_parts)
+
         # print('trans: ', trans) # scaled translation
 
         # Results dictionary (N: number of points of the object, P: maximum number of parts)
@@ -889,6 +899,7 @@ class PointCloudDataset(Dataset):
         results["anchor_indices"] = anchor_indices.astype(bool)             # (N, ) bool
         results["init_rotation"] = init_rot.astype(np.float32)              # (3, 3) float32
         results["is_pre_sampled"] = is_pre_sampled                          # bool
+        results["part_filenames"] = part_filenames_padded                   # list of str, length max_parts
 
         results["global_rotation"] = rot_global.astype(np.float32)          # (3, 3) float32, global rotation applied to all parts
         results["global_translation"] = tran_global.astype(np.float32)      # (3,) float32, global translation applied to all parts in the original unit

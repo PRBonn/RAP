@@ -81,10 +81,6 @@ def download_and_extract_weights(weights_url: str = "https://www.ipb.uni-bonn.de
     weights_zip_path = os.path.join(extract_to, "weights.zip")
     
     try:
-        logger.info(f"Downloading weights from {weights_url}...")
-        logger.info("This may take a few minutes depending on your internet connection.")
-        
-        # Download with progress bar
         def show_progress(block_num, block_size, total_size):
             downloaded = block_num * block_size
             percent = min(downloaded * 100.0 / total_size, 100.0)
@@ -93,47 +89,21 @@ def download_and_extract_weights(weights_url: str = "https://www.ipb.uni-bonn.de
         
         urllib.request.urlretrieve(weights_url, weights_zip_path, show_progress)
         sys.stdout.write("\n")
-        logger.info("Download completed.")
-        
-        # Extract zip file
-        logger.info(f"Extracting weights.zip to {extract_to}...")
         with zipfile.ZipFile(weights_zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_to)
-        
-        logger.info("Extraction completed.")
-        
-        # Clean up zip file
-        if os.path.exists(weights_zip_path):
-            os.remove(weights_zip_path)
-            logger.info("Removed temporary weights.zip file.")
+        os.remove(weights_zip_path)
         
         return True
         
     except Exception as e:
         logger.error(f"Failed to download/extract weights: {e}")
-        # Clean up partial download if exists
         if os.path.exists(weights_zip_path):
             try:
                 os.remove(weights_zip_path)
-            except:
+            except OSError:
                 pass
         return False
 
-
-def load_ply_file(ply_path: str) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-    """
-    Load a PLY file and return points and normals.
-    
-    Args:
-        ply_path: Path to PLY file
-        
-    Returns:
-        Tuple of (points, normals) where normals can be None
-    """
-    pcd = o3d.io.read_point_cloud(ply_path)
-    points = np.asarray(pcd.points)
-    normals = np.asarray(pcd.normals) if pcd.has_normals() else None
-    return points, normals
 
 def process_point_clouds(loaded_point_clouds: List[Tuple[str, np.ndarray, Optional[np.ndarray]]],
                         output_folder: str,
@@ -281,7 +251,7 @@ def process_point_clouds(loaded_point_clouds: List[Tuple[str, np.ndarray, Option
             use_torch=use_torch_downsampling
         )
         
-        logger.info(f"  {part_name}: {len(points)} -> {len(downsampled_points)} points (voxel_size={voxel_size}m)")
+        logger.debug(f"  {part_name}: {len(points)} -> {len(downsampled_points)} points (voxel_size={voxel_size}m)")
         
         parts_points.append(downsampled_points)
         parts_normals.append(downsampled_normals)
@@ -417,26 +387,13 @@ def visualize_with_toggle(original_pcds: List[o3d.geometry.PointCloud],
         logger.warning("No point clouds to visualize")
         return
     
-    # Check if normals are available when requested
-    if show_normals:
-        has_normals = all(pcd.has_normals() for pcd in original_pcds)
-        if not has_normals:
-            logger.warning("Normals requested but not all point clouds have normals computed.")
-            show_normals = False
-        else:
-            logger.info("Normals are computed and saved with point clouds (not displayed as lines in visualization)")
+    if show_normals and not all(pcd.has_normals() for pcd in original_pcds):
+        show_normals = False
     
-    # State for toggle
-    class VisualizationState:
-        def __init__(self):
-            self.show_registered = False
-            self.vis = None
-    
-    state = VisualizationState()
-    
+    state = {'show_registered': False}
+
     def toggle_view(vis):
-        """Toggle between original and registered point clouds"""
-        state.show_registered = not state.show_registered
+        state['show_registered'] = not state['show_registered']
         
         # Clear all geometries
         vis.clear_geometries()
@@ -449,12 +406,10 @@ def visualize_with_toggle(original_pcds: List[o3d.geometry.PointCloud],
             vis.add_geometry(coord_frame, reset_bounding_box=False)
         
         # Add appropriate point clouds
-        if state.show_registered:
-            logger.info("Showing REGISTERED point clouds")
+        if state['show_registered']:
             for pcd in registered_pcds:
                 vis.add_geometry(pcd, reset_bounding_box=False)
         else:
-            logger.info("Showing ORIGINAL point clouds")
             for pcd in original_pcds:
                 vis.add_geometry(pcd, reset_bounding_box=False)
         
@@ -468,9 +423,7 @@ def visualize_with_toggle(original_pcds: List[o3d.geometry.PointCloud],
         toggle_view(vis)
         return False
     
-    # Create visualizer
     vis = o3d.visualization.VisualizerWithKeyCallback()
-    state.vis = vis
     vis.create_window(window_name="Point Cloud Visualization - Press 'T' to toggle", 
                       width=1920, height=1080)
     
@@ -496,22 +449,13 @@ def visualize_with_toggle(original_pcds: List[o3d.geometry.PointCloud],
         )
         vis.add_geometry(coord_frame)
     
-    # Initially show original point clouds
-    logger.info("Showing ORIGINAL point clouds")
-    logger.info("Press 'T' to toggle between original and registered views")
-    logger.info("Press 'Q' or ESC to quit")
+    logger.info("Press 'T' to toggle, 'Q' to quit")
     
     for pcd in original_pcds:
         vis.add_geometry(pcd)
-    
-    # Set view control
-    view_control = vis.get_view_control()
-    
-    # Run visualization
+
     vis.run()
     vis.destroy_window()
-    
-    logger.info("Visualization closed")
 
 
 def main():
@@ -640,58 +584,15 @@ def main():
     feature_checkpoint_exists = os.path.exists(args.feature_extraction_checkpoint)
     
     if not flow_checkpoint_exists or not feature_checkpoint_exists:
-        logger.info("=" * 60)
-        logger.info("Checkpoint files missing - downloading weights")
-        logger.info("=" * 60)
-        
-        missing_files = []
-        if not flow_checkpoint_exists:
-            missing_files.append(f"Flow model checkpoint: {args.flow_model_checkpoint}")
-        if not feature_checkpoint_exists:
-            missing_files.append(f"Feature extraction checkpoint: {args.feature_extraction_checkpoint}")
-        
-        logger.info("Missing checkpoint files:")
-        for missing_file in missing_files:
-            logger.info(f"  - {missing_file}")
-        
-        # Ensure weights directory exists
-        # Determine weights directory from checkpoint paths
-        flow_checkpoint_dir = os.path.dirname(os.path.abspath(args.flow_model_checkpoint))
-        feature_checkpoint_dir = os.path.dirname(os.path.abspath(args.feature_extraction_checkpoint))
-        
-        # Use the common directory or default to ./weights
-        if flow_checkpoint_dir == feature_checkpoint_dir:
-            weights_dir = flow_checkpoint_dir
-        else:
-            # If different directories, use the first one or default
-            weights_dir = flow_checkpoint_dir if os.path.basename(flow_checkpoint_dir) == 'weights' else './weights'
-        
-        if not os.path.exists(weights_dir):
-            os.makedirs(weights_dir, exist_ok=True)
-            logger.info(f"Created weights directory: {weights_dir}")
-        
-        # Download and extract weights
+        logger.info("Checkpoint files missing - downloading weights...")
         if not download_and_extract_weights():
-            logger.error("Failed to download weights. Please download manually from:")
-            logger.error("  https://www.ipb.uni-bonn.de/html/projects/rap/weights.zip")
-            logger.error("  and extract to the current folder.")
+            logger.error("Failed to download weights. Get them from https://www.ipb.uni-bonn.de/html/projects/rap/weights.zip")
             return 1
-        
-        # Verify checkpoint files exist after extraction
         flow_checkpoint_exists = os.path.exists(args.flow_model_checkpoint)
         feature_checkpoint_exists = os.path.exists(args.feature_extraction_checkpoint)
-        
         if not flow_checkpoint_exists or not feature_checkpoint_exists:
-            logger.warning("Some checkpoint files are still missing after extraction.")
-            if not flow_checkpoint_exists:
-                logger.warning(f"  Flow model checkpoint not found: {args.flow_model_checkpoint}")
-            if not feature_checkpoint_exists:
-                logger.warning(f"  Feature extraction checkpoint not found: {args.feature_extraction_checkpoint}")
-            logger.warning("Please check the weights directory and ensure files are correctly extracted.")
-        else:
-            logger.info("=" * 60)
-            logger.info("All checkpoint files are now available")
-            logger.info("=" * 60)
+            logger.error("Some checkpoint files still missing after extraction")
+            return 1
     
     # Set random seeds
     set_random_seeds(args.global_seed)
@@ -701,23 +602,7 @@ def main():
         logger.error(f"Input folder does not exist: {args.input}")
         return 1
     
-    # Set dataset name: use provided name or derive from input path
-    if args.dataset_name is None:
-        # Get the final directory name from input path
-        # Normalize path to handle trailing slashes
-        input_path = os.path.normpath(args.input)
-        dataset_name = os.path.basename(input_path)
-        if not dataset_name:  # Handle case where input is root directory
-            dataset_name = "demo_dataset"
-        logger.info(f"Using dataset name from input path: {dataset_name}")
-    else:
-        dataset_name = args.dataset_name
-        logger.info(f"Using provided dataset name: {dataset_name}")
-    
-    # Load all point clouds once
-    logger.info("=" * 60)
-    logger.info("Loading point clouds")
-    logger.info("=" * 60)
+    dataset_name = args.dataset_name or os.path.basename(os.path.normpath(args.input)) or "demo_dataset"
     
     # Get all PLY files
     ply_files = natsorted([f for f in os.listdir(args.input) if f.endswith('.ply')])
@@ -726,16 +611,11 @@ def main():
         logger.error(f"No PLY files found in {args.input}")
         return 1
     
-    # Limit to first K point clouds if specified
     if args.point_cloud_count is not None:
         if args.point_cloud_count <= 0:
-            logger.error(f"point_cloud_count must be positive, got {args.point_cloud_count}")
+            logger.error("point_cloud_count must be positive")
             return 1
-        original_count = len(ply_files)
         ply_files = ply_files[:args.point_cloud_count]
-        logger.info(f"Found {original_count} PLY files, limiting to first {len(ply_files)} files")
-    else:
-        logger.info(f"Found {len(ply_files)} PLY files")
     
     if args.apply_coordinate_transform:
         logger.info("Coordinate frame transformation will be applied to all point clouds")
@@ -811,12 +691,7 @@ def main():
     logger.info(f"Successfully loaded {len(loaded_point_clouds)} point clouds")
     logger.info(f"Point cloud loading time: {elapsed_time_loading:.2f} seconds")
     
-    # Adaptive parameter setting based on point cloud size
     if args.adaptive_parameters:
-        logger.info("=" * 60)
-        logger.info("Analyzing point clouds for adaptive parameter setting")
-        logger.info("=" * 60)
-        
         if not bbox_dimensions:
             logger.error("No valid point clouds found for adaptive parameter analysis")
             return 1
@@ -855,8 +730,6 @@ def main():
         # Calculate allocated_voxel_size (used for voxel coverage calculation)
         allocated_voxel_size = 4.0 * adaptive_voxel_size
         
-        # Calculate voxel coverage for each part to determine adaptive voxel_ratio
-        logger.info("Calculating voxel coverage for adaptive voxel_ratio...")
         voxel_coverages = []
         for part_name, points, normals in loaded_point_clouds:
             if len(points) == 0:
@@ -871,18 +744,10 @@ def main():
         
         # Calculate median voxel coverage
         median_voxel_coverage = np.median(voxel_coverages)
-        logger.info(f"Median voxel coverage: {median_voxel_coverage:.0f} occupied voxels")
-        
-        # Calculate current median point count with current voxel_ratio
-        # target_point_count = voxel_coverage * voxel_ratio
         current_median_point_count = median_voxel_coverage * args.voxel_ratio
-        logger.info(f"Current median point count (with voxel_ratio={args.voxel_ratio:.6f}): {current_median_point_count:.0f}")
         
         voxel_ratio_adjusted = False
-        adjustment_reason = None
         adaptive_voxel_ratio = args.voxel_ratio
-        
-        # # Adjust voxel_ratio if median point count is larger than 20000
         target_median_point_count_max = args.max_points_per_part
         if current_median_point_count > target_median_point_count_max:
             # Calculate adaptive voxel_ratio to achieve target median point count
@@ -890,65 +755,30 @@ def main():
             adaptive_voxel_ratio = target_median_point_count_max / median_voxel_coverage
             args.voxel_ratio = adaptive_voxel_ratio
             voxel_ratio_adjusted = True
-            adjustment_reason = f"median point count ({current_median_point_count:.0f}) > {target_median_point_count_max:.0f}"
-            logger.info(f"Adjusting voxel_ratio to {adaptive_voxel_ratio:.6f} to achieve target median point count of {target_median_point_count_max:.0f}")
-            # Recalculate median point count with adjusted voxel_ratio
             current_median_point_count = median_voxel_coverage * adaptive_voxel_ratio
         
-        # Adjust voxel_ratio only if median point count is smaller than 500
         target_median_point_count_min = 500
         if current_median_point_count < target_median_point_count_min:
-            # Calculate adaptive voxel_ratio to achieve target median point count
-            # voxel_ratio = target_point_count / voxel_coverage
             adaptive_voxel_ratio = target_median_point_count_min / median_voxel_coverage
             args.voxel_ratio = adaptive_voxel_ratio
             voxel_ratio_adjusted = True
-            if adjustment_reason:
-                adjustment_reason += f" and median point count ({current_median_point_count:.0f}) < {target_median_point_count_min:.0f}"
-            else:
-                adjustment_reason = f"median point count ({current_median_point_count:.0f}) < {target_median_point_count_min:.0f}"
-            logger.info(f"Adjusting voxel_ratio to {adaptive_voxel_ratio:.6f} to achieve target median point count of {target_median_point_count_min:.0f}")
         elif not voxel_ratio_adjusted:
-            # Keep current voxel_ratio if no adjustments were made
             adaptive_voxel_ratio = args.voxel_ratio
-            logger.info(f"Keeping current voxel_ratio ({args.voxel_ratio:.6f}) as median point count ({current_median_point_count:.0f}) is between {target_median_point_count_min:.0f} and {target_median_point_count_max:.0f}")
         
         # Override parameters
         args.voxel_size = adaptive_voxel_size
         args.des_r = adaptive_des_r
-        
-        logger.info("=" * 60)
-        logger.info("Adaptively set parameters:")
-        logger.info(f"  voxel_size = {adaptive_voxel_size:.6f}")
-        logger.info(f"  des_r = {adaptive_des_r:.6f}")
-        if voxel_ratio_adjusted:
-            logger.info(f"  voxel_ratio = {adaptive_voxel_ratio:.6f} (adjusted due to: {adjustment_reason})")
-        else:
-            logger.info(f"  voxel_ratio = {adaptive_voxel_ratio:.6f} (unchanged, median point count: {current_median_point_count:.0f} is between {target_median_point_count_min:.0f} and {target_median_point_count_max:.0f})")
-        logger.info("=" * 60)
     
-    # Setup output folder (default to current directory)
-    if args.output is None:
-        output_folder = os.path.join(os.getcwd(), 'demo_output')
-        logger.info(f"Using default output directory: {output_folder}")
-    else:
-        output_folder = args.output
+    output_folder = args.output or os.path.join(os.getcwd(), 'demo_output')
     
     os.makedirs(output_folder, exist_ok=True)
     
-    # Setup log directory
-    if args.log_dir is None:
-        log_dir = os.path.join(output_folder, 'logs')
-    else:
-        log_dir = args.log_dir
+    log_dir = args.log_dir or os.path.join(output_folder, 'logs')
     
     os.makedirs(log_dir, exist_ok=True)
     
     try:
         # Process point clouds
-        logger.info("=" * 60)
-        logger.info("STEP 1: Processing point clouds")
-        logger.info("=" * 60)
         
         # Create data_root structure expected by RAP
         # The data module expects: data_root/dataset_name/sample_name/
@@ -1093,49 +923,19 @@ def main():
                     logger.info("STEP 3: Applying transformations and saving registered point clouds")
                 logger.info("=" * 60)
                 
-                import glob as glob_module
                 import re
+                results_vis_dir = os.path.join(log_dir, 'results', dataset_name)
+                sample_name = os.path.basename(sample_output_dir)
+                sample_results_dir = os.path.join(results_vis_dir, sample_name)
+                if os.path.exists(sample_results_dir):
+                    results_vis_dir = sample_results_dir
                 
-                # Set up paths
-                input_vis_dir = args.input
-                results_vis_dir = os.path.join(log_dir, 'results')
-                
-                # Find the actual results directory for this dataset
-                if os.path.exists(results_vis_dir):
-                    dataset_results_dir = os.path.join(results_vis_dir, dataset_name)
-                    if os.path.exists(dataset_results_dir):
-                        # Find the sample directory (may have nested structure)
-                        sample_name = os.path.basename(sample_output_dir)
-                        result_sample_dirs = []
-                        
-                        # Search for sample directories
-                        for root, dirs, files in os.walk(dataset_results_dir):
-                            if sample_name in root or any(f.endswith('_transform.txt') for f in files):
-                                result_sample_dirs.append(root)
-                        
-                        if result_sample_dirs:
-                            # Use the first matching directory
-                            results_vis_dir = result_sample_dirs[0]
-                            logger.info(f"Found results directory: {results_vis_dir}")
-                        else:
-                            # Fallback: use dataset_results_dir
-                            results_vis_dir = dataset_results_dir
-                            logger.info(f"Using dataset results directory: {results_vis_dir}")
-                
-                # Use pre-loaded point clouds for visualization (deep copies)
                 original_pcds = [copy.deepcopy(pcd) for pcd in visualization_pcds]
-                part_names = [part_name for part_name, _, _ in loaded_point_clouds]
+                part_names = [p[0] for p in loaded_point_clouds]
                 
-                logger.info(f"Using {len(original_pcds)} pre-loaded point clouds for visualization")
-                
-                # Compute normals for original point clouds if needed for visualization
                 if args.visualize and args.show_normals and original_pcds:
-                    first_pcd = original_pcds[0]
-                    bbox = first_pcd.get_axis_aligned_bounding_box()
-                    extent = bbox.get_extent()
+                    extent = original_pcds[0].get_axis_aligned_bounding_box().get_extent()
                     normal_radius = max(np.mean(extent) * 0.005, 0.05)
-                    logger.info(f"Computing normals for original point clouds with radius: {normal_radius:.4f}")
-                    
                     for pcd in tqdm(original_pcds, desc="Computing normals"):
                         if not pcd.has_normals():
                             pcd.estimate_normals(
@@ -1144,63 +944,15 @@ def main():
                                 )
                             )
                             pcd.orient_normals_consistent_tangent_plane(k=15)
-                    
-                    logger.info(f"Normals computed for {len(original_pcds)} point clouds")
                 
                 if original_pcds and os.path.exists(results_vis_dir):
-                    # Load global transformations
-                    generation_str = args.generation or "generation_selected"
-                    
-                    # Check if the specified generation exists, fallback to generation00 if not
-                    generation_exists = False
-                    for file in glob_module.glob(os.path.join(results_vis_dir, f"*{generation_str}_*transform.txt")):
-                        generation_exists = True
-                        break
-                    
-                    if not generation_exists:
-                        logger.info(f"Generation '{generation_str}' not found, falling back to 'generation00'")
+                    generation_str = args.generation
+                    if not glob.glob(os.path.join(results_vis_dir, f"*{generation_str}_*transform.txt")):
                         generation_str = "generation00"
-                    
-                    # Find global transform files
-                    global_transform_file = None
-
-                    # Try to find files with the generation suffix
-                    for file in glob_module.glob(os.path.join(results_vis_dir, f"*{generation_str}_global_transform.txt")):
-                        global_transform_file = file
-                        break
-                    
-                    # If not found with generation suffix, try without (for backward compatibility)
-                    if global_transform_file is None:
-                        for file in glob_module.glob(os.path.join(results_vis_dir, "*_global_transform.txt")):
-                            global_transform_file = file
-                            break
-                    
                     registered_pcds = []
                     
                     if args.output_generated:
-                        # Load generated point clouds instead of transforming original ones
-                        logger.info(f"Loading generated point clouds from results directory...")
-                        
-                        # Find generated PLY files matching the generation pattern
-                        generated_patterns = [
-                            f"*{generation_str}_part*.ply",
-                            f"*{generation_str}*part*.ply",
-                        ]
-                        
-                        # If generation_selected not found, try generation00
-                        if generation_str == "generation_selected":
-                            generated_patterns.extend([
-                                "*generation00_part*.ply",
-                                "*generation*_part*.ply",
-                            ])
-                        
-                        generated_ply_files = []
-                        for pattern in generated_patterns:
-                            found_files = glob_module.glob(os.path.join(results_vis_dir, pattern))
-                            if found_files:
-                                generated_ply_files = found_files
-                                logger.info(f"Found {len(found_files)} generated PLY files matching pattern: {pattern}")
-                                break
+                        generated_ply_files = glob.glob(os.path.join(results_vis_dir, f"*{generation_str}*part*.ply"))
                         
                         if not generated_ply_files:
                             logger.warning(f"No generated PLY files found in {results_vis_dir}")
@@ -1212,12 +964,8 @@ def main():
                                 basename = os.path.basename(ply_file)
                                 # Extract part number from filename (e.g., part00, part01, etc.)
                                 part_match = re.search(r'part(\d+)', basename)
-                                if part_match:
-                                    part_num = int(part_match.group(1))
-                                    ply_files_with_parts.append((part_num, ply_file))
-                                else:
-                                    # If no part number found, use index
-                                    ply_files_with_parts.append((len(ply_files_with_parts), ply_file))
+                                part_num = int(part_match.group(1)) if part_match else len(ply_files_with_parts)
+                                ply_files_with_parts.append((part_num, ply_file))
                             
                             # Sort by part number
                             ply_files_with_parts.sort(key=lambda x: x[0])
@@ -1250,13 +998,11 @@ def main():
                                         pcd_generated.orient_normals_consistent_tangent_plane(k=15)
                                     
                                     registered_pcds.append(pcd_generated)
-                                    logger.info(f"Loaded generated point cloud: {os.path.basename(ply_file)} ({len(points)} points)")
                                     
                                 except Exception as e:
                                     logger.warning(f"Error loading generated point cloud {ply_file}: {e}")
                                     continue
                             
-                            logger.info(f"Loaded {len(registered_pcds)} generated point clouds")
                             
                             # Save generated point clouds to registered folder (parallel to generation subfolder)
                             registered_output_dir = os.path.join(results_vis_dir, "registered")
@@ -1270,59 +1016,25 @@ def main():
                                 
                                 # Save point cloud
                                 o3d.io.write_point_cloud(registered_filepath, pcd_generated, write_ascii=False)
-                                logger.info(f"Saved generated point cloud: {registered_filename}")
-                            
-                            logger.info(f"Saved {len(registered_pcds)} generated point clouds to {registered_output_dir}")
                             
                             # Clean up temporary PLY files saved by save_pointcloud_parts
-                            logger.info("Cleaning up temporary PLY files from sample directory...")
-                            cleanup_patterns = [
-                                "*generation*_part*.ply",  # All generation part files
-                                "*_input_part*.ply",        # Input part files
-                                "*_gt_part*.ply",           # Ground truth part files
-                            ]
-                            cleaned_count = 0
-                            for pattern in cleanup_patterns:
-                                for ply_file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
+                            for pattern in ["*generation*_part*.ply", "*_input_part*.ply", "*_gt_part*.ply"]:
+                                for f in glob.glob(os.path.join(results_vis_dir, pattern)):
                                     try:
-                                        os.remove(ply_file)
-                                        cleaned_count += 1
-                                    except Exception as e:
-                                        logger.warning(f"Failed to remove {ply_file}: {e}")
-                            if cleaned_count > 0:
-                                logger.info(f"Cleaned up {cleaned_count} temporary PLY files")
+                                        os.remove(f)
+                                    except OSError:
+                                        pass
                     else:
                         # Original behavior: Load part-specific transformations and apply to point clouds
                         T_part_reference = np.eye(4)
                         
                         for idx, (pcd_original, part_name) in enumerate(zip(original_pcds, part_names)):
-                            # Find part-specific transform file
-                            part_transform_file = None
-                            
-                            # Try to find by part number in filename
-                            part_match = re.search(r'part(\d+)', part_name, re.IGNORECASE)
-                            if part_match:
-                                part_num = part_match.group(1)
-                                pattern = f"*{generation_str}_part{part_num:0>2}_transform.txt"
-                                for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
-                                    part_transform_file = file
-                                    break
-                            
-                            # If not found, try by index
-                            if part_transform_file is None:
-                                pattern = f"*{generation_str}_part{idx:02d}_transform.txt"
-                                for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
-                                    part_transform_file = file
-                                    break
-                            
-                            # If still not found, try without generation suffix
-                            if part_transform_file is None:
-                                if part_match:
-                                    part_num = part_match.group(1)
-                                    pattern = f"*_part{part_num:0>2}_transform.txt"
-                                    for file in glob_module.glob(os.path.join(results_vis_dir, pattern)):
-                                        part_transform_file = file
-                                        break
+                            # Find part-specific transform file (evaluator uses input filename in transform file name)
+                            part_name_safe = part_name.replace("/", "_").replace("\\", "_")
+                            matches = natsorted(glob.glob(os.path.join(results_vis_dir, f"*{generation_str}_{part_name_safe}_transform.txt")))
+                            if not matches:
+                                matches = natsorted(glob.glob(os.path.join(results_vis_dir, f"*_{part_name_safe}_transform.txt")))
+                            part_transform_file = matches[0] if matches else None
                             
                             if part_transform_file is None:
                                 logger.warning(f"No transform file found for part {part_name} (index {idx}), skipping")
@@ -1334,7 +1046,7 @@ def main():
                             if idx == 0:
                                 T_part_reference = T_part
                             
-                            # transform relative the first frame
+                            # transform relative to the first frame
                             T_part = np.linalg.inv(T_part_reference) @ T_part # (4, 4)
 
                             pcd_registered = copy.deepcopy(pcd_original)
@@ -1354,18 +1066,8 @@ def main():
                             
                             # Save point cloud
                             o3d.io.write_point_cloud(registered_filepath, pcd_registered, write_ascii=False)
-                            logger.info(f"Saved registered point cloud: {registered_filename}")
-                        
-                        logger.info(f"Applied transformations to {len(registered_pcds)} point clouds")
-                        logger.info(f"Saved {len(registered_pcds)} registered point clouds to {os.path.join(results_vis_dir, 'registered')}")
                     
-                    # Visualize if requested
                     if args.visualize:
-                        logger.info("=" * 60)
-                        logger.info("STEP 4: Visualizing point clouds")
-                        logger.info("=" * 60)
-
-                        # Implement visualization with toggle functionality
                         visualize_with_toggle(
                             original_pcds=original_pcds,
                             registered_pcds=registered_pcds,
@@ -1376,16 +1078,10 @@ def main():
                         )
                         
                 else:
-                    if not original_pcds:
-                        logger.warning("No point clouds found in input directory")
-                    if not os.path.exists(results_vis_dir):
-                        logger.warning(f"Results directory not found: {results_vis_dir}")
+                    logger.warning("No point clouds or results directory found")
                 
-                # Clean up temporary dataset folder after processing
                 if args.cleanup and os.path.exists(dataset_folder):
-                    logger.info(f"Cleaning up temporary dataset folder: {dataset_folder}")
                     shutil.rmtree(dataset_folder)
-                    logger.info("Cleanup completed")
                 
         else:
             logger.info("Skipping inference (--skip_inference flag set)")
@@ -1396,20 +1092,9 @@ def main():
             if args.visualize:
                 logger.warning("Visualization requested but inference was skipped. Visualization requires inference results.")
         
-        # Print timing summary
-        logger.info("=" * 60)
-        logger.info("Timing Summary:")
-        logger.info(f"  Point cloud loading: {elapsed_time_loading:.2f} seconds")
-        logger.info(f"  Preprocessing (sampling + feature extraction): {elapsed_time_preprocessing:.2f} seconds")
-        if not args.skip_inference:
-            logger.info(f"  Flow matching generation: {elapsed_time_inference:.2f} seconds")
-            total_time = elapsed_time_loading + elapsed_time_preprocessing + elapsed_time_inference
-        else:
-            total_time = elapsed_time_loading + elapsed_time_preprocessing
-        logger.info(f"  Total time: {total_time:.2f} seconds")
-        logger.info("=" * 60)
-        logger.info("Demo completed successfully!")
-        logger.info("=" * 60)
+        total_time = elapsed_time_loading + elapsed_time_preprocessing + (elapsed_time_inference if not args.skip_inference else 0)
+        logger.info(f"Done. Total: {total_time:.1f}s (load: {elapsed_time_loading:.1f}s, preprocess: {elapsed_time_preprocessing:.1f}s" +
+                    (f", inference: {elapsed_time_inference:.1f}s" if not args.skip_inference else "") + ")")
         
         return 0
         
@@ -1419,10 +1104,9 @@ def main():
         # Clean up temporary dataset folder on error if it exists
         try:
             if 'dataset_folder' in locals() and os.path.exists(dataset_folder):
-                logger.info(f"Cleaning up temporary dataset folder after error: {dataset_folder}")
                 shutil.rmtree(dataset_folder)
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up dataset folder: {cleanup_error}")
+        except OSError:
+            pass
         
         return 1
 

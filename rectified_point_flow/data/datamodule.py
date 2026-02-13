@@ -194,6 +194,9 @@ def variable_collate_fn(batch: list[dict]):
     # Rest of the keys (list)
     for k in ["index", "name", "dataset_name", "num_parts", "overlap_threshold"]:
         out[k] = [b[k] for b in batch]
+    # Part filenames: list of lists (optional, may be missing in older data)
+    if "part_filenames" in batch[0]:
+        out["part_filenames"] = [b["part_filenames"] for b in batch]
     # print(f"{time.time()}: Variable collate fn done")
     return out
 

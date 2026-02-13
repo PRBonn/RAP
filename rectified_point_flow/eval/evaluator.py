@@ -408,7 +408,7 @@ class Evaluator:
             global_translation: Global translation vector (3,) in meters.
         
         Files saved:
-            - {suffix}_part{pid}_transform.txt: Part-specific transformation matrices (4x4)
+            - {suffix}_{part_filename}_transform.txt: Part-specific transformation matrices (4x4), uses input filename when available
             - {suffix}_global_transform.txt: Global transformation matrix (4x4) if available
         """
         if rotations_pred is None or translations_pred is None:
@@ -441,6 +441,10 @@ class Evaluator:
             # Get scale for this sample to convert translations from scaled space to meters
             scale = float(data["scales"][idx])
             
+            # Get part filenames for use in output filenames (filename without extension)
+            part_filenames = data.get("part_filenames")
+            filenames_for_sample = part_filenames[idx] if part_filenames is not None else None
+            
             for pid in valid_part_indices:
                 pid_int = int(pid)
                 if pid_int < len(rotations_pred_cpu) and pid_int < len(rotations_gt):
@@ -454,34 +458,38 @@ class Evaluator:
                     t_pred_m = t_pred * scale  # (3,) - in meters
                     t_gt_m = t_gt * scale  # (3,) - in meters
                     
-                    # Compute relative transformation: transforms from GT frame to predicted frame
-                    # Given: pts_gt = pts @ R_gt^T + t_gt_m, pts_pred = pts @ R_pred^T + t_pred_m
-                    # We want: pts_pred = pts_gt @ R_relative^T + t_relative
-                    # Solving: R_relative^T = R_gt @ R_pred^T, so R_relative = R_pred @ R_gt^T
-                    # t_relative = t_pred_m - t_gt_m @ R_gt @ R_pred^T = t_pred_m - t_gt_m @ R_relative^T
-                    R_relative_T = R_gt @ R_pred.T
-                    R_relative = R_relative_T.T  # R_relative = R_pred @ R_gt^T
-                    t_relative = t_pred_m - t_gt_m @ R_relative_T  # (3,) - in meters
+                    # from condition frame to generation (registered) frame T_rc
+                    T_pred = np.eye(4, dtype=np.float32)
+                    T_pred[:3, :3] = R_pred
+                    T_pred[:3, 3] = t_pred_m
                     
-                    # Construct 4x4 relative transformation matrix
-                    transformation_matrix = np.eye(4, dtype=np.float32)
-                    transformation_matrix[:3, :3] = R_relative
-                    transformation_matrix[:3, 3] = t_relative
+                    # from condition frame to shifted input frame T_sc 
+                    T_gt = np.eye(4, dtype=np.float32)
+                    T_gt[:3, :3] = R_gt
+                    T_gt[:3, 3] = t_gt_m
+                    
+                    transformation_matrix = T_pred @ np.linalg.inv(T_gt) # (4, 4) T_rc @ T_cs = T_rs
+
 
                     # Save global transformation if available (same for all parts)
                     if global_rotation is not None and global_translation is not None:
                         R_global = global_rotation.cpu().numpy().astype(float)  # (3, 3)
                         t_global_m = global_translation.cpu().numpy().astype(float)  # (3,) in meters
                         
-                        # Construct 4x4 global transformation matrix
+                        # Construct 4x4 global transformation matrix 
+                        # from shifted input frame to original input frame T_is
                         global_transformation_matrix = np.eye(4, dtype=np.float32)
                         global_transformation_matrix[:3, :3] = R_global
                         global_transformation_matrix[:3, 3] = t_global_m  # Use scaled translation in meters
 
-                        transformation_matrix = transformation_matrix @ np.linalg.inv(global_transformation_matrix) #  (4, 4)
+                        transformation_matrix = transformation_matrix @ np.linalg.inv(global_transformation_matrix) #  (4, 4) 
                         
-                    # Save transformation matrix as txt file
-                    transform_filename = f"{dataset_name}_sample{sample_idx:05d}_{suffix}_part{pid_int:02d}_transform.txt"
+                    # Save transformation matrix as txt file (use input filename when available)
+                    if filenames_for_sample is not None and pid_int < len(filenames_for_sample) and filenames_for_sample[pid_int]:
+                        part_name_safe = str(filenames_for_sample[pid_int]).replace("/", "_").replace("\\", "_")
+                    else:
+                        part_name_safe = f"part{pid_int:02d}"
+                    transform_filename = f"{dataset_name}_sample{sample_idx:05d}_{suffix}_{part_name_safe}_transform.txt"
                     transform_path = sample_dir / transform_filename
                     
                     # Save with header for clarity
