@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 
 import gradio as gr
+from natsort import natsorted
 
 # Add paths for imports (same as demo.py)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -650,7 +651,7 @@ def build_demo_command(tmp_input_dir, tmp_output_dir, voxel_size, voxel_ratio,
 
 def process_registered_files(log_dir, tmp_output_dir, max_points_count, use_original_colors=False):
     registered_pattern = str(log_dir / "**" / "registered" / "*_registered.ply")
-    registered_files = sorted(glob.glob(registered_pattern, recursive=True))
+    registered_files = natsorted(glob.glob(registered_pattern, recursive=True))
     if not registered_files:
         return None, None
 
@@ -792,7 +793,7 @@ def run_rap_demo(ply_files, model_selection, voxel_size, voxel_ratio, apply_coor
                 log_output += f"Applied global shift [{global_shift[0]:.2f}, {global_shift[1]:.2f}, {global_shift[2]:.2f}]\n"
         yield from _yield_outputs(None, None, log_output)
     
-    input_ply_files = sorted(Path(tmp_input_dir).glob("*.ply"))
+    input_ply_files = natsorted(Path(tmp_input_dir).glob("*.ply"), key=lambda p: p.name)
     combined_input_ply_path = tmp_output_dir / "downsampled_combined_input.ply"
     combine_point_clouds([str(f) for f in input_ply_files], str(combined_input_ply_path),
                          max_points_count, use_original_colors)
@@ -849,11 +850,14 @@ example_data_dir = Path("demo_example_data").resolve()
 examples, example_names = [], []
 
 if example_data_dir.exists():
-    for folder_path in sorted(example_data_dir.iterdir()):
+    for folder_path in natsorted(example_data_dir.iterdir(), key=lambda p: p.name):
         if folder_path.is_dir():
-            all_files = sorted(list(folder_path.glob("*.ply")) + list(folder_path.glob("*.pcd")) + 
-                               list(folder_path.glob("*.pts")) + list(folder_path.glob("*.obj")) +
-                               list(folder_path.glob("*.e57")))
+            all_files = (
+                list(folder_path.glob("*.ply")) + list(folder_path.glob("*.pcd")) +
+                list(folder_path.glob("*.pts")) + list(folder_path.glob("*.obj")) +
+                list(folder_path.glob("*.e57"))
+            )
+            all_files = natsorted(all_files, key=lambda p: p.name)
             if len(all_files) >= 2:
                 examples.append([str(f.resolve()) for f in all_files])
                 example_names.append(folder_path.name)

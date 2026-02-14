@@ -952,7 +952,7 @@ def main():
                     registered_pcds = []
                     
                     if args.output_generated:
-                        generated_ply_files = glob.glob(os.path.join(results_vis_dir, f"*{generation_str}*part*.ply"))
+                        generated_ply_files = natsorted(glob.glob(os.path.join(results_vis_dir, f"*{generation_str}*part*.ply")))
                         
                         if not generated_ply_files:
                             logger.warning(f"No generated PLY files found in {results_vis_dir}")
