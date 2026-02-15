@@ -6,7 +6,7 @@
     <a href="https://github.com/PRBonn/RAP"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" /></a>
     <a href="https://arxiv.org/pdf/2512.01850"><img src="https://img.shields.io/badge/Paper-pdf-<COLOR>.svg?style=flat-square" /></a>
     <a href="https://github.com/PRBonn/RAP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
-    <a href="https://d3a6bcfe31f49ec589.gradio.live/"><img src="https://img.shields.io/badge/-GradioDemo-3B4252?style=flat&logo=huggingface&logoColor=orange" /></a>
+    <a href="https://d3a6bcfe31f49ec589.gradio.live/"><img src="https://img.shields.io/badge/GradioDemo-RAP-red?logo=gradio" /></a>
     <a href="https://huggingface.co/YuePanEdward/RAP"><img src="https://img.shields.io/badge/-Model-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
   </p>
   
@@ -48,8 +48,9 @@
    - [x] Release the inference code and RAP model v1.0.
    - [x] Release RAP model v1.1.
    - [ ] Release the training code.
-   - [ ] Release the training data generation code and example training data.
-   - [ ] Release RAP model with other feature backbones, allowing metric scale difference, and handling 4D registration. 
+   - [ ] Release the training data curation code and example training data.
+   - [ ] Add evaluation code on public datasets.
+   - [ ] Release RAP model v1.5 with other feature backbones, allowing metric scale difference, and handling 4D registration. 
 
 
 
