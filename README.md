@@ -37,7 +37,7 @@
 
 ---
 
-![rap_teaser](https://github.com/user-attachments/assets/932cc717-c2d4-4251-ba7e-7a36472a04a7)
+![rap_teaser](https://register-any-point.github.io/images/rap_teaser_new.png)
 
 ----
 
