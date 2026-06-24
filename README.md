@@ -6,7 +6,7 @@
     <a href="https://github.com/PRBonn/RAP"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" /></a>
     <a href="https://arxiv.org/pdf/2512.01850"><img src="https://img.shields.io/badge/Paper-pdf-<COLOR>.svg?style=flat-square" /></a>
     <a href="https://github.com/PRBonn/RAP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
-    <a href="https://7625724317dc6ef7e2.gradio.live"><img src="https://img.shields.io/badge/GradioDemo-RAP-red?logo=gradio" /></a>
+    <a href="https://db0aa0c4df10b51258.gradio.live"><img src="https://img.shields.io/badge/GradioDemo-RAP-red?logo=gradio" /></a>
     <a href="https://huggingface.co/YuePanEdward/RAP"><img src="https://img.shields.io/badge/-Model-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
   </p>
   
