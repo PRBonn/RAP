@@ -31,7 +31,7 @@
     <a href="https://gradientspaces.stanford.edu/"><strong>Stanford University</strong></a>
 
 
-  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://7625724317dc6ef7e2.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a> | <a href="https://huggingface.co/YuePanEdward/RAP">Model</a> </h3>
+  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://db0aa0c4df10b51258.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a> | <a href="https://huggingface.co/YuePanEdward/RAP">Model</a> </h3>
   <div align="center"></div>
 </p>
 
