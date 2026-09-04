@@ -4,10 +4,11 @@
   <p align="center">
     <a href="https://github.com/PRBonn/RAP"><img src="https://img.shields.io/badge/python-3670A0?style=flat-square&logo=python&logoColor=ffdd54" /></a>
     <a href="https://github.com/PRBonn/RAP"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" /></a>
-    <a href="https://arxiv.org/pdf/2512.01850"><img src="https://img.shields.io/badge/Paper-pdf-<COLOR>.svg?style=flat-square" /></a>
+    <a href="https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/pan2026eccv.pdf"><img src="https://img.shields.io/badge/Paper-pdf-<COLOR>.svg?style=flat-square" /></a>
     <a href="https://github.com/PRBonn/RAP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
     <a href="https://7625724317dc6ef7e2.gradio.live"><img src="https://img.shields.io/badge/GradioDemo-RAP-red?logo=gradio" /></a>
     <a href="https://huggingface.co/YuePanEdward/RAP"><img src="https://img.shields.io/badge/-Model-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
+    <a href="https://huggingface.co/datasets/YuePanEdward/regx-benchmark"><img src="https://img.shields.io/badge/-RegX%20Benchmark-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
   </p>
   
   <p align="center">
@@ -31,7 +32,7 @@
     <a href="https://gradientspaces.stanford.edu/"><strong>Stanford University</strong></a>
 
 
-  <h3 align="center"><a href="https://arxiv.org/pdf/2512.01850">Paper</a> | <a href="https://7625724317dc6ef7e2.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a> | <a href="https://huggingface.co/YuePanEdward/RAP">Model</a> </h3>
+  <h3 align="center"><a href="https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/pan2026eccv.pdf">Paper</a> | <a href="https://7625724317dc6ef7e2.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a> | <a href="https://huggingface.co/YuePanEdward/RAP">Model</a> | <a href="https://huggingface.co/datasets/YuePanEdward/regx-benchmark">Benchmark</a> </h3>
   <div align="center"></div>
 </p>
 
@@ -41,16 +42,17 @@
 
 ----
 
-![rap_example](https://github.com/user-attachments/assets/7878fbb6-1605-42b7-bb6f-37ce3e8d5760)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c9cc2026-53cf-4d25-8530-09d558e90fe4" alt="rap_example" />
+</p>
 
 
 ## TODO List
    - [x] Release the inference code and RAP model v1.0.
    - [x] Release RAP model v1.1.
-   - [ ] Release the training code.
+   - [x] Release the cross-domain multi-view registration benchmark [RegX](https://huggingface.co/datasets/YuePanEdward/regx-benchmark).
    - [ ] Release the training data curation code and example training data.
-   - [ ] Add evaluation code on public datasets.
-   - [ ] Release RAP model v1.5 with other feature backbones, allowing metric scale difference, and handling 4D registration. 
+   - [ ] Release RAP models with other feature backbones, allowing metric scale differences, and handling 4D registration. 
 
 
 
@@ -107,13 +109,13 @@ bash ./scripts/test_script_example.sh
 
 If you use RAP for any academic work, please cite:
 
-```
-@article{pan2025arxiv,
-  title = {{Register Any Point: Scaling 3D Point Cloud Registration by Flow Matching}},
-  author = {Pan, Yue and Sun, Tao and Zhu, Liyuan and Nunes, Lucas and Armeni, Iro and Behley, Jens and Stachniss, Cyrill},
-  journal = arxiv,
-  volume  = {arXiv:2512.01850},
-  year    = {2025}
+```bibtex
+@inproceedings{pan2026eccv,
+  title     = {{Register Any Point: Scaling 3D Point Cloud Registration by Flow Matching}},
+  author    = {Pan, Yue and Sun, Tao and Zhu, Liyuan and Nunes, Lucas and
+               Armeni, Iro and Behley, Jens and Stachniss, Cyrill},
+  booktitle = {Proc.~of the Europ.~Conf.~on Computer Vision (ECCV)},
+  year      = {2026}
 }
 ```
 </details>
