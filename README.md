@@ -42,11 +42,6 @@
 
 ----
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/c9cc2026-53cf-4d25-8530-09d558e90fe4" alt="rap_example" />
-</p>
-
-
 ## TODO List
    - [x] Release the inference code and RAP model v1.0.
    - [x] Release RAP model v1.1.
