@@ -6,7 +6,7 @@
     <a href="https://github.com/PRBonn/RAP"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" /></a>
     <a href="https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/pan2026eccv.pdf"><img src="https://img.shields.io/badge/Paper-pdf-<COLOR>.svg?style=flat-square" /></a>
     <a href="https://github.com/PRBonn/RAP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
-    <a href="https://db0aa0c4df10b51258.gradio.live"><img src="https://img.shields.io/badge/GradioDemo-RAP-red?logo=gradio" /></a>
+    <a href="https://huggingface.co/spaces/YuePanEdward/RAP"><img src="https://img.shields.io/badge/-Demo-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
     <a href="https://huggingface.co/YuePanEdward/RAP"><img src="https://img.shields.io/badge/-Model-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
     <a href="https://huggingface.co/datasets/YuePanEdward/regx-benchmark"><img src="https://img.shields.io/badge/-RegX%20Benchmark-3B4252?style=flat&logo=huggingface&logoColor=" /></a>
   </p>
@@ -32,7 +32,7 @@
     <a href="https://gradientspaces.stanford.edu/"><strong>Stanford University</strong></a>
 
 
-  <h3 align="center"><a href="https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/pan2026eccv.pdf">Paper</a> | <a href="https://7625724317dc6ef7e2.gradio.live">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a> | <a href="https://huggingface.co/YuePanEdward/RAP">Model</a> | <a href="https://huggingface.co/datasets/YuePanEdward/regx-benchmark">Benchmark</a> </h3>
+  <h3 align="center"><a href="https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/pan2026eccv.pdf">Paper</a> | <a href="https://huggingface.co/spaces/YuePanEdward/RAP">Demo</a> | <a href="https://register-any-point.github.io/">Homepage</a> | <a href="https://huggingface.co/YuePanEdward/RAP">Model</a> | <a href="https://huggingface.co/datasets/YuePanEdward/regx-benchmark">Benchmark</a> </h3>
   <div align="center"></div>
 </p>
 
